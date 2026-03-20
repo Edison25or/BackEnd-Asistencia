@@ -10,4 +10,5 @@ public class UsuarioInfoDTO {
     private String  rol;                  // Ej: "ROLE_SUPERADMIN"
     private String  email;                // username (= email del trabajador)
     private boolean debeCambiarPassword;  // true cuando la clave es igual al DNI
+    private Long idTrabajador;  // ← agregar
 }

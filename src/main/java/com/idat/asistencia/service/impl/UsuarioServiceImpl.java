@@ -64,6 +64,8 @@ public class UsuarioServiceImpl implements UsuarioService {
                 .rol(usuario.getRol())
                 .email(usuario.getUsername())
                 .debeCambiarPassword(debeCambiarPassword)
+                // Añades la línea aquí:
+                .idTrabajador(usuario.getTrabajador() != null ? usuario.getTrabajador().getIdTrabajador() : null)
                 .build();
     }
 
