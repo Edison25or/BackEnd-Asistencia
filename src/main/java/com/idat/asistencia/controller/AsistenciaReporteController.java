@@ -17,7 +17,7 @@ public class AsistenciaReporteController {
 
     private final AsistenciaReporteService service;
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
     @GetMapping
     public ResponseEntity<List<AsistenciaReporteDTO>> getReporte(
             @RequestParam String  fechaInicio,
@@ -30,4 +30,3 @@ public class AsistenciaReporteController {
         );
     }
 }
-

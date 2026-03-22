@@ -6,11 +6,14 @@ import com.idat.asistencia.dto.ConsolidadoDTOs.ConsolidadoReporteResponse;
 import com.idat.asistencia.exception.BusinessException;
 import com.idat.asistencia.exception.ResourceNotFoundException;
 import com.idat.asistencia.model.entity.*;
+import com.idat.asistencia.model.entity.Usuario;
 import com.idat.asistencia.model.enums.EstadoAsistencia;
 import com.idat.asistencia.model.enums.EstadoQuincena;
 import com.idat.asistencia.model.enums.TipoAsistencia;
 import com.idat.asistencia.repository.*;
 import com.idat.asistencia.service.AuditoriaService;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import com.idat.asistencia.service.ConsolidadoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -222,6 +225,9 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
 
     @Override
     public ConsolidadoResponse getConsolidadoTrabajador(Long idQuincena, Long idTrabajador) {
+        // Si es TRABAJADOR, forzar que solo vea su propio consolidado
+        idTrabajador = resolverIdTrabajador(idTrabajador);
+
         return toResponse(consolidadoRepo
                 .findByQuincena_IdQuincenaAndTrabajador_IdTrabajador(idQuincena, idTrabajador)
                 .orElseThrow(() -> new ResourceNotFoundException(
@@ -405,6 +411,9 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
     // ════════════════════════════════════════════════════════════
     @Override
     public List<BolsaHistorialDTO> getHistorialBolsa(Long idTrabajador) {
+        // Si es TRABAJADOR, forzar que solo vea su propio historial
+        idTrabajador = resolverIdTrabajador(idTrabajador);
+
         return consolidadoRepo
                 .findUltimosCerradosByTrabajador(idTrabajador, Long.MAX_VALUE)
                 .stream()
@@ -477,6 +486,26 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
     // ════════════════════════════════════════════════════════════
     // HELPERS
     // ════════════════════════════════════════════════════════════
+
+    /**
+     * Si el usuario autenticado es ROLE_TRABAJADOR, ignora el idTrabajador
+     * recibido y devuelve el id del trabajador autenticado.
+     * Para otros roles, devuelve el idTrabajador original sin cambios.
+     */
+    private Long resolverIdTrabajador(Long idTrabajador) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        boolean esTrabajador = auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_TRABAJADOR"));
+
+        if (esTrabajador) {
+            String email = auth.getName();
+            Usuario usuario = usuarioRepo.findByUsername(email)
+                    .orElseThrow(() -> new BusinessException("Usuario no encontrado"));
+            return usuario.getTrabajador().getIdTrabajador();
+        }
+        return idTrabajador;
+    }
+
     private Quincena buscarQuincena(Long id) {
         return quincenaRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Quincena no encontrada."));

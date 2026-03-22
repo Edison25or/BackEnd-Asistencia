@@ -30,14 +30,13 @@ public class TrabajadorController {
         return new ResponseEntity<>(trabajadorService.crearTrabajador(request), HttpStatus.CREATED);
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'SUPERVISOR', 'TRABAJADOR')")
     @PutMapping("/{id}")
     public ResponseEntity<TrabajadorResponseDTO> updateTrabajador(
             @PathVariable Long id,
             @Valid @RequestBody TrabajadorRequestDTO request,
             Authentication authentication) {
 
-        // Extraer el rol del usuario autenticado para validación en el service
         String rol = authentication.getAuthorities().stream()
                 .findFirst()
                 .map(a -> a.getAuthority())
@@ -54,7 +53,7 @@ public class TrabajadorController {
         return ResponseEntity.ok(trabajadorService.obtenerTodosLosTrabajadores(estado, pageable));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'SUPERVISOR', 'TRABAJADOR')")
     @GetMapping("/{id}")
     public ResponseEntity<TrabajadorResponseDTO> getTrabajadorById(@PathVariable Long id) {
         return ResponseEntity.ok(trabajadorService.obtenerTrabajadorById(id));
@@ -77,7 +76,7 @@ public class TrabajadorController {
         return ResponseEntity.ok(trabajadorService.reingresarTrabajador(id, idPuesto));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'SUPERVISOR', 'TRABAJADOR')")
     @GetMapping("/buscar")
     public ResponseEntity<Page<TrabajadorResponseDTO>> buscar(
             @RequestParam String q,

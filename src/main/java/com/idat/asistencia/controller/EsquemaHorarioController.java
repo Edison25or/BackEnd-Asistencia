@@ -33,7 +33,7 @@ public class EsquemaHorarioController {
         return ResponseEntity.ok(service.getAllAgrupados());
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
     @GetMapping("/{id}")
     public ResponseEntity<EsquemaResponse> getById(@PathVariable Integer id) {
         return ResponseEntity.ok(service.getById(id));

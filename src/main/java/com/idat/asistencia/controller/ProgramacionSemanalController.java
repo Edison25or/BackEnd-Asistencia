@@ -26,20 +26,18 @@ public class ProgramacionSemanalController {
         return ResponseEntity.ok(service.getAll());
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
     @GetMapping("/semana/{fecha}")
     public ResponseEntity<List<ProgramacionResponse>> getBySemana(@PathVariable String fecha) {
         return ResponseEntity.ok(service.getBySemana(fecha));
     }
 
-    // Asignación individual
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
     @PostMapping
     public ResponseEntity<ProgramacionResponse> crear(@Valid @RequestBody ProgramacionRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.crear(request));
     }
 
-    // Asignación masiva desde grupo — expande a registros individuales
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
     @PostMapping("/desde-grupo")
     public ResponseEntity<ProgramacionBulkResponse> crearDesdeGrupo(@RequestBody BulkRequest req) {
@@ -47,7 +45,6 @@ public class ProgramacionSemanalController {
                 .body(service.crearDesdeGrupo(req.getIdGrupo(), req.getSemanaInicio(), req.getIdEsquema()));
     }
 
-    // ── Confirmar semana + generar pre-registros de asistencia ─
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
     @PostMapping("/confirmar-semana")
     public ResponseEntity<ConfirmarSemanaResponse> confirmarSemana(
@@ -64,7 +61,7 @@ public class ProgramacionSemanalController {
 
     @Data
     public static class ConfirmarSemanaRequest {
-        private String semanaInicio;  // "yyyy-MM-dd" (sábado)
+        private String semanaInicio;
     }
 
     @Data

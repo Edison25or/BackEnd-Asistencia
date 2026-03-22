@@ -20,14 +20,12 @@ public class ConsolidadoController {
 
     private final ConsolidadoService service;
 
-    // ── Resumen de quincenas ──────────────────────────────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
     @GetMapping("/quincenas")
     public ResponseEntity<List<QuincenaConsolidadoResumenDTO>> quincenas() {
         return ResponseEntity.ok(service.getQuincenasConResumen());
     }
 
-    // ── Generar consolidado de una quincena ───────────────────
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
     @PostMapping("/generar/{idQuincena}")
     public ResponseEntity<List<ConsolidadoResponse>> generar(
@@ -35,7 +33,6 @@ public class ConsolidadoController {
         return ResponseEntity.ok(service.generarConsolidado(idQuincena));
     }
 
-    // ── Listar consolidado de una quincena ────────────────────
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
     @GetMapping("/{idQuincena}")
     public ResponseEntity<List<ConsolidadoResponse>> listar(
@@ -43,8 +40,7 @@ public class ConsolidadoController {
         return ResponseEntity.ok(service.getConsolidado(idQuincena));
     }
 
-    // ── Consolidado de un trabajador específico ───────────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
     @GetMapping("/{idQuincena}/trabajador/{idTrabajador}")
     public ResponseEntity<ConsolidadoResponse> porTrabajador(
             @PathVariable Long idQuincena,
@@ -52,7 +48,6 @@ public class ConsolidadoController {
         return ResponseEntity.ok(service.getConsolidadoTrabajador(idQuincena, idTrabajador));
     }
 
-    // ── Editar campos manuales ────────────────────────────────
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
     @PatchMapping("/{idConsolidado}")
     public ResponseEntity<ConsolidadoResponse> editar(
@@ -61,7 +56,6 @@ public class ConsolidadoController {
         return ResponseEntity.ok(service.editar(idConsolidado, req));
     }
 
-    // ── Cerrar quincena ───────────────────────────────────────
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
     @PostMapping("/cerrar")
     public ResponseEntity<CierreQuincenaResponse> cerrar(
@@ -70,7 +64,6 @@ public class ConsolidadoController {
         return ResponseEntity.ok(service.cerrarQuincena(req, auth.getName()));
     }
 
-    // ── Solicitar reapertura (Admin) ──────────────────────────
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
     @PostMapping("/solicitar-reaper")
     public ResponseEntity<Void> solicitarReapertura(@RequestBody ReaperturaRequest req) {
@@ -78,15 +71,13 @@ public class ConsolidadoController {
         return ResponseEntity.ok().build();
     }
 
-    // ── Historial de bolsa de un trabajador ──────────────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
     @GetMapping("/bolsa/{idTrabajador}")
     public ResponseEntity<List<BolsaHistorialDTO>> historialBolsa(
             @PathVariable Long idTrabajador) {
         return ResponseEntity.ok(service.getHistorialBolsa(idTrabajador));
     }
 
-    // ── Reporte consolidado exportable (todos los trabajadores) ─
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
     @GetMapping("/reporte/{idQuincena}")
     public ResponseEntity<ConsolidadoReporteResponse> reporte(
@@ -94,7 +85,6 @@ public class ConsolidadoController {
         return ResponseEntity.ok(service.getReporte(idQuincena));
     }
 
-    // ── Aprobar reapertura (SuperAdmin) ───────────────────────
     @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping("/{idQuincena}/aprobar-reaper")
     public ResponseEntity<Void> aprobarReapertura(

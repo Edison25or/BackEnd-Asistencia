@@ -19,6 +19,7 @@ public class UsuarioController {
 
     private final UsuarioService usuarioService;
 
+
     @GetMapping("/me")
     public ResponseEntity<UsuarioInfoDTO> getMiInfo(Authentication authentication) {
         return ResponseEntity.ok(usuarioService.getMiInfo(authentication.getName()));

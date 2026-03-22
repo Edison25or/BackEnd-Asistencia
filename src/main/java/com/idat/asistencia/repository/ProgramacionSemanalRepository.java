@@ -56,4 +56,8 @@ public interface ProgramacionSemanalRepository extends JpaRepository<Programacio
         WHERE p.semanaInicio = :semanaInicio
     """)
     List<ProgramacionSemanal> findBySemanaInicio(@Param("semanaInicio") LocalDate semanaInicio);
+
+    // Verificar que un esquema pertenezca a una programación de un trabajador específico
+    boolean existsByEsquema_IdEsquemaAndTrabajador_IdTrabajador(
+            Integer idEsquema, Long idTrabajador);
 }

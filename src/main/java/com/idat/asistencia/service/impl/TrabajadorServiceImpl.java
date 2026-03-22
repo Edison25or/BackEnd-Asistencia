@@ -13,6 +13,8 @@ import com.idat.asistencia.service.TrabajadorService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +36,7 @@ public class TrabajadorServiceImpl implements TrabajadorService {
     private final TrabajadorMapper          trabajadorMapper;
     private final PasswordEncoder           passwordEncoder;
     private final GrupoTrabajoRepository    grupoRepo;
-    private final AuditoriaService          auditoriaService;   // ← Sprint 2
+    private final AuditoriaService          auditoriaService;
 
     private static final String TABLA = "trabajadores";
 
@@ -61,7 +63,6 @@ public class TrabajadorServiceImpl implements TrabajadorService {
                 .trabajador(guardado).puesto(guardado.getPuesto())
                 .fechaInicio(LocalDate.now()).motivoCambio("Contratación inicial").build());
 
-        // ── Auditoría: registro de creación ──────────────────
         auditoriaService.registrar(TABLA, guardado.getIdTrabajador(), "CREAR");
 
         return trabajadorMapper.toDto(guardado);
@@ -72,6 +73,19 @@ public class TrabajadorServiceImpl implements TrabajadorService {
     @Transactional
     public TrabajadorResponseDTO actualizarTrabajador(Long id, TrabajadorRequestDTO dto,
                                                       String rolEditor) {
+
+        // Si es TRABAJADOR, verificar que solo edite su propio perfil
+        if ("ROLE_TRABAJADOR".equals(rolEditor)) {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            String emailAutenticado = auth.getName();
+            Trabajador trabajadorVerif = trabajadorRepository.findById(id)
+                    .orElseThrow(() -> new ResourceNotFoundException("Trabajador no encontrado: " + id));
+            if (trabajadorVerif.getUsuario() == null ||
+                    !trabajadorVerif.getUsuario().getUsername().equals(emailAutenticado)) {
+                throw new BusinessException("No tienes permiso para editar este perfil.");
+            }
+        }
+
         Trabajador t = trabajadorRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Trabajador no encontrado: " + id));
 
@@ -89,7 +103,6 @@ public class TrabajadorServiceImpl implements TrabajadorService {
         if (docCambio && trabajadorRepository.existsByNroDocumento(dto.getNroDocumento()))
             throw new BusinessException("El documento " + dto.getNroDocumento() + " ya está en uso.");
 
-        // ── Capturar valores ANTES del cambio (para auditoría) ─
         Map<String, String[]> cambios = new LinkedHashMap<>();
         capturar(cambios, "docIdentidad",         t.getDocIdentidad(),        dto.getDocIdentidad());
         capturar(cambios, "nroDocumento",          t.getNroDocumento(),         dto.getNroDocumento());
@@ -148,7 +161,6 @@ public class TrabajadorServiceImpl implements TrabajadorService {
 
         Trabajador guardado = trabajadorRepository.save(t);
 
-        // ── Auditoría: registrar solo los campos que realmente cambiaron ──
         auditoriaService.registrarCambios(TABLA, guardado.getIdTrabajador(), cambios);
 
         TrabajadorResponseDTO respuesta = trabajadorMapper.toDto(guardado);
@@ -209,10 +221,7 @@ public class TrabajadorServiceImpl implements TrabajadorService {
         });
 
         trabajadorRepository.save(t);
-
-        // ── Auditoría ─────────────────────────────────────────
-        auditoriaService.registrarCampo(TABLA, id, "CESAR",
-                "motivo", null, motivo);
+        auditoriaService.registrarCampo(TABLA, id, "CESAR", "motivo", null, motivo);
     }
 
     // ── REINGRESAR ────────────────────────────────────────────
@@ -239,8 +248,6 @@ public class TrabajadorServiceImpl implements TrabajadorService {
                 .fechaInicio(LocalDate.now()).motivoCambio("Reingreso a la empresa").build());
 
         Trabajador guardado = trabajadorRepository.save(t);
-
-        // ── Auditoría ─────────────────────────────────────────
         auditoriaService.registrarCampo(TABLA, id, "REINGRESAR",
                 "idPuesto", null, String.valueOf(idPuesto));
 
@@ -261,13 +268,10 @@ public class TrabajadorServiceImpl implements TrabajadorService {
 
         t.getUsuario().setPassword(passwordEncoder.encode(t.getNroDocumento()));
         trabajadorRepository.save(t);
-
-        // ── Auditoría ─────────────────────────────────────────
         auditoriaService.registrar(TABLA, id, "RESET_PASSWORD");
     }
 
     // ── HELPERS ───────────────────────────────────────────────
-
     private void poblarGrupo(TrabajadorResponseDTO dto, Long idTrabajador) {
         grupoRepo.findByTrabajadorId(idTrabajador).ifPresent(g -> {
             dto.setGrupoActualId(g.getIdGrupo());
@@ -275,7 +279,6 @@ public class TrabajadorServiceImpl implements TrabajadorService {
         });
     }
 
-    /** Agrega un par anterior/nuevo al mapa solo si ambos valores son distintos. */
     private void capturar(Map<String, String[]> mapa, String campo,
                           String anterior, String nuevo) {
         mapa.put(campo, new String[]{ anterior, nuevo });

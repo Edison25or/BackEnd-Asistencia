@@ -27,6 +27,7 @@ public class JwtService {
                 .claim("rol", rol) // <-- METEMOS EL ROL AQUÍ
                 .subject(userDetails.getUsername())
                 .issuedAt(new Date(System.currentTimeMillis()))
+                //.expiration(new Date(System.currentTimeMillis() + 1000 * 8)) // 45 segundos
                 .expiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 24)) // 24 horas
                 .signWith(getSignInKey())
                 .compact();

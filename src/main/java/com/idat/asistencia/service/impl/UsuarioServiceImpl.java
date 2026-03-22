@@ -69,6 +69,7 @@ public class UsuarioServiceImpl implements UsuarioService {
                 .build();
     }
 
+
     // Punto 5: regex de contraseña segura
     private static final String PASSWORD_REGEX =
             "^(?=.*[a-z])(?=.*[A-Z])(?=.*\\d)(?=.*[!@#$%^&*()\\-_=+\\[\\]{}|;:,.<>?])[^\\s]{10,20}$";

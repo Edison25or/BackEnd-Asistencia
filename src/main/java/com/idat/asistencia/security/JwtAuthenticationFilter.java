@@ -34,33 +34,48 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         final String jwt;
         final String username;
 
-        // Si no hay token o no tiene el prefijo "Bearer ", lo ignoramos y seguimos
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // Extraemos el token (quitando los 7 caracteres de "Bearer ")
         jwt = authHeader.substring(7);
-        username = jwtService.extractUsername(jwt);
 
-        // Si encontramos un usuario y aún no está autenticado en este hilo
-        if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            UserDetails userDetails = this.userDetailsService.loadUserByUsername(username);
+        // ← ENVOLVER EN TRY-CATCH
+        try {
+            username = jwtService.extractUsername(jwt);
 
-            // Si el token es válido, le damos luz verde en Spring Security
-            if (jwtService.isTokenValid(jwt, userDetails)) {
-                UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        userDetails,
-                        null,
-                        userDetails.getAuthorities()
-                );
-                authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-                SecurityContextHolder.getContext().setAuthentication(authToken);
+            if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
+                UserDetails userDetails = this.userDetailsService.loadUserByUsername(username);
+
+                if (jwtService.isTokenValid(jwt, userDetails)) {
+                    UsernamePasswordAuthenticationToken authToken =
+                            new UsernamePasswordAuthenticationToken(
+                                    userDetails, null, userDetails.getAuthorities()
+                            );
+                    authToken.setDetails(
+                            new WebAuthenticationDetailsSource().buildDetails(request)
+                    );
+                    SecurityContextHolder.getContext().setAuthentication(authToken);
+                }
             }
-        }
 
-        // Continuamos con la ejecución
-        filterChain.doFilter(request, response);
+            filterChain.doFilter(request, response);
+
+        } catch (io.jsonwebtoken.ExpiredJwtException e) {
+            // Token expirado → devolver 401 directamente
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setContentType("application/json");
+            response.getWriter().write(
+                    "{\"status\":401,\"message\":\"Sesión expirada. Inicia sesión nuevamente.\"}"
+            );
+        } catch (Exception e) {
+            // Cualquier otro error de JWT → 401
+            response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+            response.setContentType("application/json");
+            response.getWriter().write(
+                    "{\"status\":401,\"message\":\"Token inválido.\"}"
+            );
+        }
     }
 }
