@@ -21,7 +21,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/maestros")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class MaestroController {
 
     private final GeneroRepository generoRepository;

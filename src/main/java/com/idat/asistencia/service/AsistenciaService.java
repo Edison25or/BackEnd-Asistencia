@@ -7,6 +7,7 @@ public interface AsistenciaService {
     // Lector (existentes)
     MarcarAsistenciaResponse marcar(String codigo);
     List<AsistenciaResumenDTO> getTrabajadoresEnPlanta();
+    List<EnPlantaPublicDTO> getEnPlantaPublica();
     List<AsistenciaResumenDTO> getAsistenciasDia();
 
     // Revisión

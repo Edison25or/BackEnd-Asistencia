@@ -10,6 +10,7 @@ import com.idat.asistencia.exception.BusinessException;
 import com.idat.asistencia.exception.ResourceNotFoundException;
 import com.idat.asistencia.model.entity.*;
 import com.idat.asistencia.repository.*;
+import com.idat.asistencia.security.SecurityHelper;
 import com.idat.asistencia.service.ProgramacionSemanalService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -35,6 +36,7 @@ public class ProgramacionSemanalServiceImpl implements ProgramacionSemanalServic
     private final QuincenaRepository            quincenaRepo;
     private final AsistenciaRepository  asistenciaRepository;
     private final HorarioDiaRepository   horarioDiaRepo;
+    private final SecurityHelper         securityHelper;
 
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("dd/MM");
 
@@ -46,8 +48,19 @@ public class ProgramacionSemanalServiceImpl implements ProgramacionSemanalServic
 
     @Override
     public List<ProgramacionResponse> getBySemana(String semanaInicioStr) {
-        return programacionRepo.findBySemanaInicio(LocalDate.parse(semanaInicioStr))
+        List<ProgramacionResponse> todas = programacionRepo
+                .findBySemanaInicio(LocalDate.parse(semanaInicioStr))
                 .stream().map(this::toResponse).collect(Collectors.toList());
+
+        // V3 FIX: Si es TRABAJADOR, filtrar solo sus propias programaciones
+        if (securityHelper.esTrabajador()) {
+            Long idPropio = securityHelper.getIdTrabajadorAutenticado();
+            return todas.stream()
+                    .filter(p -> idPropio.equals(p.getIdTrabajador()))
+                    .collect(Collectors.toList());
+        }
+
+        return todas;
     }
 
     // ── Asignación individual ─────────────────────────────────

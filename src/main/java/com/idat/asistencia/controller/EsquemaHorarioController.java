@@ -14,40 +14,39 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/esquemas-horario")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class EsquemaHorarioController {
 
     private final EsquemaHorarioService service;
 
     // ── Para dropdowns (programación, asistencia) ─────────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping
     public ResponseEntity<List<EsquemaResponse>> getAll() {
         return ResponseEntity.ok(service.getAll());
     }
 
     // ── Para la pantalla de gestión (con historial de versiones) ─
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping("/agrupados")
     public ResponseEntity<List<EsquemaGrupoResponse>> getAllAgrupados() {
         return ResponseEntity.ok(service.getAllAgrupados());
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR','TRABAJADOR')")
     @GetMapping("/{id}")
     public ResponseEntity<EsquemaResponse> getById(@PathVariable Integer id) {
         return ResponseEntity.ok(service.getById(id));
     }
 
     // ── Crear nuevo esquema (versión 1) ───────────────────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping
     public ResponseEntity<EsquemaResponse> crear(@Valid @RequestBody EsquemaRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.crear(request));
     }
 
     // ── Crear nueva versión de un esquema existente ───────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping("/{grupoNombre}/nueva-version")
     public ResponseEntity<EsquemaResponse> crearNuevaVersion(
             @PathVariable String grupoNombre,
@@ -57,14 +56,14 @@ public class EsquemaHorarioController {
     }
 
     // ── Toggle activo/inactivo (reemplaza DELETE) ─────────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PatchMapping("/{id}/toggle")
     public ResponseEntity<EsquemaResponse> toggleActivo(@PathVariable Integer id) {
         return ResponseEntity.ok(service.toggleActivo(id));
     }
 
     // ── Contar programaciones (para modal de advertencia) ─────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @GetMapping("/{id}/programaciones-count")
     public ResponseEntity<Long> contarProgramaciones(@PathVariable Integer id) {
         return ResponseEntity.ok(service.contarProgramaciones(id));

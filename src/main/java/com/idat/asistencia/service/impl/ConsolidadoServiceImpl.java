@@ -11,9 +11,8 @@ import com.idat.asistencia.model.enums.EstadoAsistencia;
 import com.idat.asistencia.model.enums.EstadoQuincena;
 import com.idat.asistencia.model.enums.TipoAsistencia;
 import com.idat.asistencia.repository.*;
+import com.idat.asistencia.security.SecurityHelper;
 import com.idat.asistencia.service.AuditoriaService;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import com.idat.asistencia.service.ConsolidadoService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -37,6 +36,7 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
     private final TrabajadorRepository   trabajadorRepo;
     private final UsuarioRepository      usuarioRepo;
     private final AuditoriaService       auditoriaService;
+    private final SecurityHelper         securityHelper;
 
     // Tope diario en minutos para tasa A (2 horas = 120 min por normativa peruana)
     private static final int TOPE_TASA_A_MIN = 120;
@@ -380,12 +380,41 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
     // ════════════════════════════════════════════════════════════
     @Override
     public List<QuincenaConsolidadoResumenDTO> getQuincenasConResumen() {
+        // V5 FIX: Si es TRABAJADOR, solo mostrar quincenas donde tiene consolidado
+        // y ocultar datos internos (pendientes, flags de generación/cierre)
+        boolean esTrabajador = securityHelper.esTrabajador();
+        Long idTrabajadorPropio = esTrabajador ? securityHelper.getIdTrabajadorAutenticado() : null;
+
         return quincenaRepo.findAll().stream()
                 .sorted(Comparator
                         .comparingInt(Quincena::getAnio).reversed()
                         .thenComparingInt(Quincena::getMes).reversed()
                         .thenComparingInt(Quincena::getNumero).reversed())
                 .map(q -> {
+                    if (esTrabajador) {
+                        // Para TRABAJADOR: verificar si tiene consolidado en esta quincena
+                        boolean tieneConsolidado = consolidadoRepo
+                                .findByQuincena_IdQuincenaAndTrabajador_IdTrabajador(
+                                        q.getIdQuincena(), idTrabajadorPropio)
+                                .isPresent();
+
+                        if (!tieneConsolidado) return null; // Filtrar quincenas sin consolidado
+
+                        return QuincenaConsolidadoResumenDTO.builder()
+                                .idQuincena(q.getIdQuincena())
+                                .descripcion(q.getDescripcion())
+                                .fechaInicio(q.getFechaInicio().toString())
+                                .fechaFin(q.getFechaFin().toString())
+                                .estado(q.getEstado().name())
+                                // Ocultar datos internos para TRABAJADOR
+                                .totalConsolidados(0)
+                                .pendientesRevision(0)
+                                .puedeGenerarse(false)
+                                .puedeCerrarse(false)
+                                .build();
+                    }
+
+                    // Para roles administrativos: comportamiento original completo
                     long totalC = consolidadoRepo.countByQuincena_IdQuincena(q.getIdQuincena());
                     long pend   = asistenciaRepo.countByQuincena_IdQuincenaAndEstadoIn(
                             q.getIdQuincena(),
@@ -403,6 +432,7 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
                             .puedeCerrarse(totalC > 0 && q.getEstado() == EstadoQuincena.ABIERTA)
                             .build();
                 })
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
     }
 
@@ -493,17 +523,7 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
      * Para otros roles, devuelve el idTrabajador original sin cambios.
      */
     private Long resolverIdTrabajador(Long idTrabajador) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        boolean esTrabajador = auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_TRABAJADOR"));
-
-        if (esTrabajador) {
-            String email = auth.getName();
-            Usuario usuario = usuarioRepo.findByUsername(email)
-                    .orElseThrow(() -> new BusinessException("Usuario no encontrado"));
-            return usuario.getTrabajador().getIdTrabajador();
-        }
-        return idTrabajador;
+        return securityHelper.resolverIdTrabajador(idTrabajador);
     }
 
     private Quincena buscarQuincena(Long id) {

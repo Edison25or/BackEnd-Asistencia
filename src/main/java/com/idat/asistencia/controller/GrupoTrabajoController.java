@@ -14,30 +14,29 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/grupos")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class GrupoTrabajoController {
 
     private final GrupoTrabajoService service;
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping
     public ResponseEntity<List<GrupoResponse>> getAll() {
         return ResponseEntity.ok(service.getAll());
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping("/{id}")
     public ResponseEntity<GrupoResponse> getById(@PathVariable Integer id) {
         return ResponseEntity.ok(service.getById(id));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping
     public ResponseEntity<GrupoResponse> crear(@Valid @RequestBody GrupoRequest request) {
         return new ResponseEntity<>(service.crear(request), HttpStatus.CREATED);
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PutMapping("/{id}")
     public ResponseEntity<GrupoResponse> actualizar(
             @PathVariable Integer id,
@@ -53,7 +52,7 @@ public class GrupoTrabajoController {
     }
 
     // Remover un trabajador específico del grupo
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @DeleteMapping("/{idGrupo}/trabajadores/{idTrabajador}")
     public ResponseEntity<GrupoResponse> removerTrabajador(
             @PathVariable Integer idGrupo,

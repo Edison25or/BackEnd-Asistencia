@@ -15,12 +15,11 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/programaciones")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class ProgramacionSemanalController {
 
     private final ProgramacionSemanalService service;
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping
     public ResponseEntity<List<ProgramacionResponse>> getAll() {
         return ResponseEntity.ok(service.getAll());
@@ -32,27 +31,27 @@ public class ProgramacionSemanalController {
         return ResponseEntity.ok(service.getBySemana(fecha));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping
     public ResponseEntity<ProgramacionResponse> crear(@Valid @RequestBody ProgramacionRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.crear(request));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping("/desde-grupo")
     public ResponseEntity<ProgramacionBulkResponse> crearDesdeGrupo(@RequestBody BulkRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(service.crearDesdeGrupo(req.getIdGrupo(), req.getSemanaInicio(), req.getIdEsquema()));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping("/confirmar-semana")
     public ResponseEntity<ConfirmarSemanaResponse> confirmarSemana(
             @RequestBody ConfirmarSemanaRequest req) {
         return ResponseEntity.ok(service.confirmarSemana(req.getSemanaInicio()));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> eliminar(@PathVariable Long id) {
         service.eliminar(id);

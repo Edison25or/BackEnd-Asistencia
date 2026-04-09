@@ -15,7 +15,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/asistencia")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class AsistenciaController {
 
     private final AsistenciaService service;
@@ -26,28 +25,34 @@ public class AsistenciaController {
         return ResponseEntity.ok(service.marcar(codigo));
     }
 
-    // ── Panel del día ─────────────────────────────────────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    // ── Panel público para kiosco de marcado (sin autenticación) ─
+    @GetMapping("/en-planta-publica")
+    public ResponseEntity<List<EnPlantaPublicDTO>> enPlantaPublica() {
+        return ResponseEntity.ok(service.getEnPlantaPublica());
+    }
+
+    // ── Panel del día (protegido — solo dashboard) ──────────
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping("/en-planta")
     public ResponseEntity<List<AsistenciaResumenDTO>> enPlanta() {
         return ResponseEntity.ok(service.getTrabajadoresEnPlanta());
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping("/dia")
     public ResponseEntity<List<AsistenciaResumenDTO>> dia() {
         return ResponseEntity.ok(service.getAsistenciasDia());
     }
 
     // ── Revisión de asistencias ───────────────────────────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping("/revision/{idQuincena}")
     public ResponseEntity<List<AsistenciaRevisionDTO>> revision(
             @PathVariable Long idQuincena) {
         return ResponseEntity.ok(service.getParaRevision(idQuincena));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PatchMapping("/validar-tiempos")
     public ResponseEntity<AsistenciaRevisionDTO> validar(
             @RequestBody ValidarTiemposRequest req,
@@ -55,7 +60,7 @@ public class AsistenciaController {
         return ResponseEntity.ok(service.validarTiempos(req, auth.getName()));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping("/no-programada")
     public ResponseEntity<AsistenciaRevisionDTO> registrarNoProgramada(
             @RequestBody RegistrarNoProgramadaRequest req) {
@@ -64,13 +69,13 @@ public class AsistenciaController {
     }
 
     // ── Quincenas ─────────────────────────────────────────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping("/quincenas")
     public ResponseEntity<List<QuincenaResumenDTO>> quincenas() {
         return ResponseEntity.ok(service.getQuincenas());
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping("/quincenas")
     public ResponseEntity<QuincenaResumenDTO> crearQuincena(
             @RequestBody CrearQuincenaRequest req) {

@@ -8,19 +8,19 @@ import com.idat.asistencia.mapper.TrabajadorMapper;
 import com.idat.asistencia.model.entity.*;
 import com.idat.asistencia.model.enums.EstadoTrabajador;
 import com.idat.asistencia.repository.*;
+import com.idat.asistencia.security.SecurityHelper;
 import com.idat.asistencia.service.AuditoriaService;
 import com.idat.asistencia.service.TrabajadorService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -37,6 +37,7 @@ public class TrabajadorServiceImpl implements TrabajadorService {
     private final PasswordEncoder           passwordEncoder;
     private final GrupoTrabajoRepository    grupoRepo;
     private final AuditoriaService          auditoriaService;
+    private final SecurityHelper            securityHelper;
 
     private static final String TABLA = "trabajadores";
 
@@ -76,14 +77,7 @@ public class TrabajadorServiceImpl implements TrabajadorService {
 
         // Si es TRABAJADOR, verificar que solo edite su propio perfil
         if ("ROLE_TRABAJADOR".equals(rolEditor)) {
-            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            String emailAutenticado = auth.getName();
-            Trabajador trabajadorVerif = trabajadorRepository.findById(id)
-                    .orElseThrow(() -> new ResourceNotFoundException("Trabajador no encontrado: " + id));
-            if (trabajadorVerif.getUsuario() == null ||
-                    !trabajadorVerif.getUsuario().getUsername().equals(emailAutenticado)) {
-                throw new BusinessException("No tienes permiso para editar este perfil.");
-            }
+            securityHelper.verificarAccesoPropio(id);
         }
 
         Trabajador t = trabajadorRepository.findById(id)
@@ -184,6 +178,9 @@ public class TrabajadorServiceImpl implements TrabajadorService {
 
     @Override
     public TrabajadorResponseDTO obtenerTrabajadorById(Long id) {
+        // V1 FIX: Si es TRABAJADOR, solo puede consultar su propio perfil
+        securityHelper.verificarAccesoPropio(id);
+
         Trabajador t = trabajadorRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Trabajador no encontrado: " + id));
         TrabajadorResponseDTO dto = trabajadorMapper.toDto(t);
@@ -195,6 +192,16 @@ public class TrabajadorServiceImpl implements TrabajadorService {
     @Override
     public Page<TrabajadorResponseDTO> buscarTrabajadores(String q, EstadoTrabajador estado,
                                                           Pageable pageable) {
+        // V2 FIX: Si es TRABAJADOR, solo puede encontrar su propio perfil
+        if (securityHelper.esTrabajador()) {
+            Long idPropio = securityHelper.getIdTrabajadorAutenticado();
+            Trabajador t = trabajadorRepository.findById(idPropio)
+                    .orElseThrow(() -> new ResourceNotFoundException("Trabajador no encontrado."));
+            TrabajadorResponseDTO dto = trabajadorMapper.toDto(t);
+            return new org.springframework.data.domain.PageImpl<>(
+                    List.of(dto), pageable, 1);
+        }
+
         return trabajadorRepository.buscarPorTermino(q, estado, pageable)
                 .map(trabajadorMapper::toDto);
     }

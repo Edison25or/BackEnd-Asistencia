@@ -12,12 +12,11 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/asistencias/reporte")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class AsistenciaReporteController {
 
     private final AsistenciaReporteService service;
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR','TRABAJADOR')")
     @GetMapping
     public ResponseEntity<List<AsistenciaReporteDTO>> getReporte(
             @RequestParam String  fechaInicio,

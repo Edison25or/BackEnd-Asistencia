@@ -14,6 +14,7 @@ public class AsistenciaDTOs {
         private String accion;        // ENTRADA | SALIDA
         private String hora;
         private String estado;
+        private String estadoDiario;  // A_TIEMPO | TARDE | NO_PROGRAMADO
         private String puestoNombre;
         // Nuevos
         private String tipo;          // PROGRAMADA | NO_PROGRAMADA
@@ -35,6 +36,16 @@ public class AsistenciaDTOs {
         private String horaSalida;    // = salidaReal
         private String estado;
         private String tipo;
+    }
+
+    // ── Resumen público para pantalla de marcado (kiosco) ────
+    // No expone IDs ni documentos — seguro para endpoint público
+    @Data @Builder
+    public static class EnPlantaPublicDTO {
+        private String nombreCompleto;
+        private String puestoNombre;
+        private String areaNombre;
+        private String horaEntrada;
     }
 
     // ── Detalle completo para formulario de revisión ──────────

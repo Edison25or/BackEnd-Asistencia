@@ -6,12 +6,8 @@ import com.idat.asistencia.model.enums.Parentesco;
 import com.idat.asistencia.repository.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.CommandLineRunner;
-import org.springframework.context.annotation.Bean;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
-import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
-import org.springframework.web.filter.CorsFilter;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -79,30 +75,30 @@ public class DataSeeder implements CommandLineRunner {
 
         // Orden: nombre, descripcion, id_area
         Object[][] data = {
-                {"Gerente Administrativo",       "Descripción de Puesto: Gerente Administrativo",       1},
-                {"Asistente Administrativo",     "Descripción de Puesto: Asistente Administrativo",     1},
-                {"Jefe de Producción",           "Descripción de Puesto: Jefe de Producción",           2},
-                {"Supervisor de Producción",     "Descripción de Puesto: Supervisor de Producción",     2},
-                {"Supervisor de Almacén",        "Descripción de Puesto: Supervisor de Almacén",        2},
-                {"Auxiliar de Almacén",          "Descripción de Puesto: Auxiliar de Almacén",          2},
-                {"Líder de Línea",               "Descripción de Puesto: Líder de Línea",               2},
-                {"Ayudante de Línea",            "Descripción de Puesto: Ayudante de Línea",            2},
-                {"Jefe de Calidad",              "Descripción de Puesto: Jefe de Calidad",              3},
-                {"Supervisor de Calidad",        "Descripción de Puesto: Supervisor de Calidad",        3},
-                {"Asistente de Calidad",         "Descripción de Puesto: Asistente de Calidad",         3},
-                {"Auxiliar de Limpieza",         "Descripción de Puesto: Auxiliar de Limpieza",         3},
-                {"Técnico Mécanico",             "Descripción de Puesto: Técnico Mécanico",             4},
-                {"Técnico Electricista",         "Descripción de Puesto: Técnico Electricista",         4},
-                {"Jefe de Contabilidad",         "Descripción de Puesto: Jefe de Contabilidad",         5},
-                {"Asitente Contable",            "Descripción de Puesto: Asitente Contable",            5},
-                {"Gerente Comercial",            "Descripción de Puesto: Gerente Comercial",            6},
-                {"Asistente Comercial",          "Descripción de Puesto: Asistente Comercial",          6},
-                {"Responsable de Tienda",        "Descripción de Puesto: Responsable de Tienda",        6},
-                {"Jefe de Exportaciones",        "Descripción de Puesto: Jefe de Exportaciones",        7},
-                {"Asistente de Exportaciones",   "Descripción de Puesto: Asistente de Exportaciones",   7},
-                {"Seguridad de Planta",          "Descripción de Puesto: Seguridad de Planta",          8},
-                {"Jefe de Ssoma",                "Descripción de Puesto: Jefe de Ssoma",                9},
-                {"Asistente Ssoma",              "Descripción de Puesto: Asistente Ssoma",              9}
+                {"Gerente Administrativo", "Descripción de Puesto: Gerente Administrativo", 1},
+                {"Asistente Administrativo", "Descripción de Puesto: Asistente Administrativo", 1},
+                {"Jefe de Producción", "Descripción de Puesto: Jefe de Producción", 2},
+                {"Supervisor de Producción", "Descripción de Puesto: Supervisor de Producción", 2},
+                {"Supervisor de Almacén", "Descripción de Puesto: Supervisor de Almacén", 2},
+                {"Auxiliar de Almacén", "Descripción de Puesto: Auxiliar de Almacén", 2},
+                {"Líder de Línea", "Descripción de Puesto: Líder de Línea", 2},
+                {"Ayudante de Línea", "Descripción de Puesto: Ayudante de Línea", 2},
+                {"Jefe de Calidad", "Descripción de Puesto: Jefe de Calidad", 3},
+                {"Supervisor de Calidad", "Descripción de Puesto: Supervisor de Calidad", 3},
+                {"Asistente de Calidad", "Descripción de Puesto: Asistente de Calidad", 3},
+                {"Auxiliar de Limpieza", "Descripción de Puesto: Auxiliar de Limpieza", 3},
+                {"Técnico Mécanico", "Descripción de Puesto: Técnico Mécanico", 4},
+                {"Técnico Electricista", "Descripción de Puesto: Técnico Electricista", 4},
+                {"Jefe de Contabilidad", "Descripción de Puesto: Jefe de Contabilidad", 5},
+                {"Asitente Contable", "Descripción de Puesto: Asitente Contable", 5},
+                {"Gerente Comercial", "Descripción de Puesto: Gerente Comercial", 6},
+                {"Asistente Comercial", "Descripción de Puesto: Asistente Comercial", 6},
+                {"Responsable de Tienda", "Descripción de Puesto: Responsable de Tienda", 6},
+                {"Jefe de Exportaciones", "Descripción de Puesto: Jefe de Exportaciones", 7},
+                {"Asistente de Exportaciones", "Descripción de Puesto: Asistente de Exportaciones", 7},
+                {"Seguridad de Planta", "Descripción de Puesto: Seguridad de Planta", 8},
+                {"Jefe de Ssoma", "Descripción de Puesto: Jefe de Ssoma", 9},
+                {"Asistente Ssoma", "Descripción de Puesto: Asistente Ssoma", 9}
         };
 
         List<Puesto> lista = new ArrayList<>();
@@ -119,7 +115,7 @@ public class DataSeeder implements CommandLineRunner {
         }
         puestoRepository.saveAll(lista);
     }
-    
+
     private void cargarTrabajadoresYUsuarios() {
         // MATRIZ DE DATOS
         // Orden: p_nombre, s_nombre, a_paterno, a_materno, contacto, direccion, doc_id, nro_doc, fecha_nac, nro_cont, telf, id_genero, id_puesto, parentesco, email, estado
@@ -240,15 +236,4 @@ public class DataSeeder implements CommandLineRunner {
         }
     }
 
-    @Bean
-    public CorsFilter corsFilter() {
-        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
-        CorsConfiguration config = new CorsConfiguration();
-        config.setAllowCredentials(true);
-        config.addAllowedOrigin("http://localhost:4200");
-        config.addAllowedHeader("*");
-        config.addAllowedMethod("*");
-        source.registerCorsConfiguration("/api/**", config);
-        return new CorsFilter(source);
-    }
 }

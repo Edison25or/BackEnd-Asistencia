@@ -2,8 +2,8 @@ package com.idat.asistencia.security;
 
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.Jwts;
-import io.jsonwebtoken.io.Decoders;
 import io.jsonwebtoken.security.Keys;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 
@@ -13,22 +13,25 @@ import java.util.function.Function;
 
 @Service
 public class JwtService {
-    // Llave secreta estática para pruebas
-    private static final String SECRET_KEY = "VGhpcy1pcy1hLXZlcnktc2VjdXJlLWtleS1mb3Itand0LXRva2Vucy1pbi1zcHJpbmctYm9vdC1wcm9qZWN0";
+
+    // V7 FIX: Leer la clave desde application.properties en lugar de hardcodearla
+    @Value("${security.jwt.secret}")
+    private String secretKey;
+
+    @Value("${security.jwt.expiration}")
+    private long expirationMs;
 
     // =================================================================
     // CÓDIGO ACTUALIZADO: Inyectamos el rol en los Claims del token
     // =================================================================
     public String generateToken(UserDetails userDetails) {
-        // Obtenemos el rol de los Authorities de Spring Security
         String rol = userDetails.getAuthorities().iterator().next().getAuthority();
 
         return Jwts.builder()
-                .claim("rol", rol) // <-- METEMOS EL ROL AQUÍ
+                .claim("rol", rol)
                 .subject(userDetails.getUsername())
                 .issuedAt(new Date(System.currentTimeMillis()))
-                //.expiration(new Date(System.currentTimeMillis() + 1000 * 8)) // 45 segundos
-                .expiration(new Date(System.currentTimeMillis() + 1000 * 60 * 60 * 24)) // 24 horas
+                .expiration(new Date(System.currentTimeMillis() + expirationMs))
                 .signWith(getSignInKey())
                 .compact();
     }
@@ -64,7 +67,7 @@ public class JwtService {
     }
 
     private SecretKey getSignInKey() {
-        byte[] keyBytes = Decoders.BASE64.decode(SECRET_KEY);
+        byte[] keyBytes = secretKey.getBytes(java.nio.charset.StandardCharsets.UTF_8);
         return Keys.hmacShaKeyFor(keyBytes);
     }
 }

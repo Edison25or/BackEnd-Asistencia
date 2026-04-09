@@ -1,15 +1,11 @@
 package com.idat.asistencia.service.impl;
 
 import com.idat.asistencia.dto.AsistenciaReporteDTO;
-import com.idat.asistencia.exception.BusinessException;
 import com.idat.asistencia.model.entity.Asistencia;
-import com.idat.asistencia.model.entity.Usuario;
 import com.idat.asistencia.repository.AsistenciaRepository;
-import com.idat.asistencia.repository.UsuarioRepository;
+import com.idat.asistencia.security.SecurityHelper;
 import com.idat.asistencia.service.AsistenciaReporteService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,7 +22,7 @@ import java.util.stream.Collectors;
 public class AsistenciaReporteServiceImpl implements AsistenciaReporteService {
 
     private final AsistenciaRepository asistenciaRepo;
-    private final UsuarioRepository    usuarioRepository;
+    private final SecurityHelper       securityHelper;
 
     private static final DateTimeFormatter FMT_TIME = DateTimeFormatter.ofPattern("HH:mm");
 
@@ -38,15 +34,8 @@ public class AsistenciaReporteServiceImpl implements AsistenciaReporteService {
             Integer idArea) {
 
         // Si es TRABAJADOR, forzar que solo vea sus propios registros
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        boolean esTrabajador = auth.getAuthorities().stream()
-                .anyMatch(a -> a.getAuthority().equals("ROLE_TRABAJADOR"));
-
-        if (esTrabajador) {
-            String email = auth.getName();
-            Usuario usuario = usuarioRepository.findByUsername(email)
-                    .orElseThrow(() -> new BusinessException("Usuario no encontrado"));
-            idTrabajador = usuario.getTrabajador().getIdTrabajador();
+        if (securityHelper.esTrabajador()) {
+            idTrabajador = securityHelper.getIdTrabajadorAutenticado();
             idArea = null;
         }
 

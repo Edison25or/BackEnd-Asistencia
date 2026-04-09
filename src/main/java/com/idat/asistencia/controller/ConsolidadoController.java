@@ -15,12 +15,11 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/consolidado")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class ConsolidadoController {
 
     private final ConsolidadoService service;
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR','TRABAJADOR')")
     @GetMapping("/quincenas")
     public ResponseEntity<List<QuincenaConsolidadoResumenDTO>> quincenas() {
         return ResponseEntity.ok(service.getQuincenasConResumen());
@@ -33,14 +32,14 @@ public class ConsolidadoController {
         return ResponseEntity.ok(service.generarConsolidado(idQuincena));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping("/{idQuincena}")
     public ResponseEntity<List<ConsolidadoResponse>> listar(
             @PathVariable Long idQuincena) {
         return ResponseEntity.ok(service.getConsolidado(idQuincena));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR','TRABAJADOR')")
     @GetMapping("/{idQuincena}/trabajador/{idTrabajador}")
     public ResponseEntity<ConsolidadoResponse> porTrabajador(
             @PathVariable Long idQuincena,
@@ -71,14 +70,14 @@ public class ConsolidadoController {
         return ResponseEntity.ok().build();
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR','TRABAJADOR')")
     @GetMapping("/bolsa/{idTrabajador}")
     public ResponseEntity<List<BolsaHistorialDTO>> historialBolsa(
             @PathVariable Long idTrabajador) {
         return ResponseEntity.ok(service.getHistorialBolsa(idTrabajador));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
     @GetMapping("/reporte/{idQuincena}")
     public ResponseEntity<ConsolidadoReporteResponse> reporte(
             @PathVariable Long idQuincena) {

@@ -18,7 +18,6 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/auditoria")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 @PreAuthorize("hasRole('SUPERADMIN')")
 public class AuditoriaController {
 

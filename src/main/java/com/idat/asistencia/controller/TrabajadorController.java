@@ -18,7 +18,6 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/trabajadores")
 @RequiredArgsConstructor
-@CrossOrigin(origins = "*")
 public class TrabajadorController {
 
     private final TrabajadorService trabajadorService;

@@ -61,7 +61,7 @@ public class AsistenciaServiceImpl implements AsistenciaService {
         LocalDate hoy   = LocalDate.now();
         LocalTime ahora = LocalTime.now();
 
-        // Buscar o crear asistencia del día
+        // Buscar asistencia existente del día (pre-registro o marcado previo)
         Asistencia asistencia = asistenciaRepo
                 .findByTrabajador_IdTrabajadorAndFecha(idTrabajador, hoy)
                 .orElse(null);
@@ -72,8 +72,9 @@ public class AsistenciaServiceImpl implements AsistenciaService {
 
         HorarioDia horarioDia = null;
         EsquemaHorario esquema = null;
+        boolean tieneProgramacion = progOpt.isPresent();
 
-        if (progOpt.isPresent()) {
+        if (tieneProgramacion) {
             esquema = progOpt.get().getEsquema();
             int diaSemana = hoy.getDayOfWeek().getValue();
             horarioDia = horarioDiaRepo
@@ -93,17 +94,22 @@ public class AsistenciaServiceImpl implements AsistenciaService {
 
             // Construir o actualizar asistencia
             if (asistencia == null) {
+                // Determinar tipo: si no tiene programación → NO_PROGRAMADA
+                TipoAsistencia tipo = tieneProgramacion
+                        ? TipoAsistencia.PROGRAMADA
+                        : TipoAsistencia.NO_PROGRAMADA;
+
                 asistencia = Asistencia.builder()
                         .trabajador(trabajador)
                         .fecha(hoy)
-                        .tipo(TipoAsistencia.PROGRAMADA)
+                        .tipo(tipo)
                         .estado(EstadoAsistencia.PENDIENTE)
                         .esquema(esquema)
                         .quincena(quincena)
                         .build();
             }
 
-            // Poblar datos programados desde el esquema
+            // Poblar datos programados desde el esquema (solo si tiene horario)
             if (horarioDia != null && !Boolean.TRUE.equals(horarioDia.getEsDescanso())) {
                 asistencia.setIngresoProg(horarioDia.getHoraEntrada());
                 asistencia.setMinRefrigerioProg(horarioDia.getMinutosRefrigerio());
@@ -119,8 +125,9 @@ public class AsistenciaServiceImpl implements AsistenciaService {
             asistencia.setIngresoReal(ahora);
             asistencia.setEstado(EstadoAsistencia.MARCADO);
 
-            // Calcular estado diario (A_TIEMPO / TARDE) y tardanza
+            // Calcular estado diario
             if (asistencia.getIngresoProg() != null) {
+                // Tiene horario programado → evaluar tardanza
                 int tolerancia = esquema != null ? esquema.getToleranciaMinutos() : 0;
                 long diffMin = Duration.between(asistencia.getIngresoProg(), ahora).toMinutes();
                 if (diffMin > tolerancia) {
@@ -130,7 +137,8 @@ public class AsistenciaServiceImpl implements AsistenciaService {
                     asistencia.setEstadoDiario("A_TIEMPO");
                 }
             } else {
-                asistencia.setEstadoDiario("A_TIEMPO");
+                // Sin horario programado → NO_PROGRAMADO
+                asistencia.setEstadoDiario("NO_PROGRAMADO");
             }
 
             asistenciaRepo.save(asistencia);
@@ -156,6 +164,7 @@ public class AsistenciaServiceImpl implements AsistenciaService {
                 .accion(accion)
                 .hora(ahora.toString().substring(0, 5))
                 .estado(asistencia.getEstado().name())
+                .estadoDiario(asistencia.getEstadoDiario())
                 .tipo(asistencia.getTipo().name())
                 .puestoNombre(trabajador.getPuesto() != null ? trabajador.getPuesto().getPuesto() : null)
                 .ingresoProg(asistencia.getIngresoProg() != null
@@ -171,6 +180,27 @@ public class AsistenciaServiceImpl implements AsistenciaService {
     public List<AsistenciaResumenDTO> getTrabajadoresEnPlanta() {
         return asistenciaRepo.findTrabajadoresEnPlanta(LocalDate.now())
                 .stream().map(this::toResumenDTO).collect(Collectors.toList());
+    }
+
+    /**
+     * Versión PÚBLICA de en-planta para la pantalla de marcado (kiosco).
+     * No expone IDs, documentos ni datos sensibles.
+     * Endpoint público: no requiere autenticación.
+     */
+    @Override
+    public List<EnPlantaPublicDTO> getEnPlantaPublica() {
+        return asistenciaRepo.findTrabajadoresEnPlanta(LocalDate.now())
+                .stream().map(a -> {
+                    Trabajador t = a.getTrabajador();
+                    return EnPlantaPublicDTO.builder()
+                            .nombreCompleto(t.getPNombre() + " " + t.getAPaterno() + " " + t.getAMaterno())
+                            .puestoNombre(t.getPuesto() != null ? t.getPuesto().getPuesto() : null)
+                            .areaNombre(t.getPuesto() != null && t.getPuesto().getArea() != null
+                                    ? t.getPuesto().getArea().getArea() : null)
+                            .horaEntrada(a.getIngresoReal() != null
+                                    ? a.getIngresoReal().toString().substring(0, 5) : null)
+                            .build();
+                }).collect(Collectors.toList());
     }
 
     @Override

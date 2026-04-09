@@ -38,6 +38,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/login").permitAll()
                         .requestMatchers("/api/auth/recuperar-password").permitAll()
                         .requestMatchers("/api/asistencia/marcar").permitAll()
+                        .requestMatchers("/api/asistencia/en-planta-publica").permitAll()
                         .requestMatchers("/api/maestros/generos").permitAll()
                         .requestMatchers("/api/maestros/areas").permitAll()
                         .requestMatchers("/api/maestros/areas/*/puestos").permitAll()

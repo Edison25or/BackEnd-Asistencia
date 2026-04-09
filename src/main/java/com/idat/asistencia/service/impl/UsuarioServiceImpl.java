@@ -24,7 +24,7 @@ public class UsuarioServiceImpl implements UsuarioService {
     @Override
     public String cambiarRol(Integer idTrabajador, String nuevoRol) {
         List<String> rolesValidos = List.of(
-                "ROLE_SUPERADMIN", "ROLE_ADMIN", "ROLE_SUPERVISOR", "ROLE_TRABAJADOR"
+                "ROLE_SUPERADMIN", "ROLE_ADMIN", "ROLE_JEFE", "ROLE_SUPERVISOR", "ROLE_TRABAJADOR"
         );
         if (!rolesValidos.contains(nuevoRol))
             throw new IllegalArgumentException("El rol ingresado no es válido.");
