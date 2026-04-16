@@ -10,7 +10,6 @@ import org.springframework.stereotype.Component;
 
 /**
  * Utilidad centralizada para resolución de identidad del usuario autenticado.
- * Evita repetir el patrón "es TRABAJADOR → forzar su propio ID" en cada service.
  */
 @Component
 @RequiredArgsConstructor
@@ -18,34 +17,28 @@ public class SecurityHelper {
 
     private final UsuarioRepository usuarioRepository;
 
-    /**
-     * Retorna la autenticación actual del contexto de seguridad.
-     */
     public Authentication getAuthentication() {
         return SecurityContextHolder.getContext().getAuthentication();
     }
 
-    /**
-     * Retorna true si el usuario autenticado tiene el rol ROLE_TRABAJADOR.
-     */
     public boolean esTrabajador() {
         Authentication auth = getAuthentication();
         return auth.getAuthorities().stream()
                 .anyMatch(a -> a.getAuthority().equals("ROLE_TRABAJADOR"));
     }
 
-    /**
-     * Retorna true si el usuario autenticado tiene el rol ROLE_SUPERVISOR.
-     */
     public boolean esSupervisor() {
         Authentication auth = getAuthentication();
         return auth.getAuthorities().stream()
                 .anyMatch(a -> a.getAuthority().equals("ROLE_SUPERVISOR"));
     }
 
-    /**
-     * Retorna el rol del usuario autenticado (e.g. "ROLE_SUPERADMIN").
-     */
+    public boolean esJefe() {
+        Authentication auth = getAuthentication();
+        return auth.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_JEFE"));
+    }
+
     public String getRol() {
         return getAuthentication().getAuthorities().stream()
                 .findFirst()
@@ -53,19 +46,12 @@ public class SecurityHelper {
                 .orElse("");
     }
 
-    /**
-     * Retorna el Usuario (entidad) del usuario autenticado.
-     */
     public Usuario getUsuarioAutenticado() {
         String username = getAuthentication().getName();
         return usuarioRepository.findByUsername(username)
                 .orElseThrow(() -> new BusinessException("Usuario no encontrado: " + username));
     }
 
-    /**
-     * Retorna el idTrabajador del usuario autenticado.
-     * Lanza excepción si el usuario no tiene trabajador vinculado.
-     */
     public Long getIdTrabajadorAutenticado() {
         Usuario usuario = getUsuarioAutenticado();
         if (usuario.getTrabajador() == null) {
@@ -75,11 +61,21 @@ public class SecurityHelper {
     }
 
     /**
-     * Si el usuario es TRABAJADOR, ignora el idTrabajador recibido y devuelve
-     * el id del trabajador autenticado. Para otros roles, devuelve el valor original.
-     *
-     * Patrón reutilizable para endpoints que comparten TRABAJADOR y roles superiores.
+     * Retorna el idArea del JEFE autenticado (basado en su trabajador → puesto → area).
+     * Retorna null si:
+     *   - El usuario no tiene trabajador vinculado
+     *   - El trabajador no tiene puesto
+     *   - El puesto no tiene área
+     * Útil para filtrar recursos por área.
      */
+    public Integer getIdAreaJefeAutenticado() {
+        Usuario usuario = getUsuarioAutenticado();
+        if (usuario.getTrabajador() == null) return null;
+        if (usuario.getTrabajador().getPuesto() == null) return null;
+        if (usuario.getTrabajador().getPuesto().getArea() == null) return null;
+        return usuario.getTrabajador().getPuesto().getArea().getIdArea();
+    }
+
     public Long resolverIdTrabajador(Long idTrabajador) {
         if (esTrabajador()) {
             return getIdTrabajadorAutenticado();
@@ -87,17 +83,23 @@ public class SecurityHelper {
         return idTrabajador;
     }
 
-    /**
-     * Verifica que el idTrabajador solicitado pertenezca al usuario autenticado.
-     * Si no coincide, lanza BusinessException.
-     * Solo aplica cuando el usuario es TRABAJADOR.
-     */
     public void verificarAccesoPropio(Long idTrabajadorSolicitado) {
         if (esTrabajador()) {
             Long idPropio = getIdTrabajadorAutenticado();
             if (!idPropio.equals(idTrabajadorSolicitado)) {
                 throw new BusinessException("No tienes permiso para acceder a esta información.");
             }
+        }
+    }
+
+    public void verificarAccesoPropioOAdmin(Long idTrabajadorSolicitado) {
+        String rol = getRol();
+        boolean esAdminOSuper = "ROLE_SUPERADMIN".equals(rol) || "ROLE_ADMIN".equals(rol);
+        if (esAdminOSuper) return;
+
+        Long idPropio = getIdTrabajadorAutenticado();
+        if (!idPropio.equals(idTrabajadorSolicitado)) {
+            throw new BusinessException("No tienes permiso para acceder a este perfil.");
         }
     }
 }

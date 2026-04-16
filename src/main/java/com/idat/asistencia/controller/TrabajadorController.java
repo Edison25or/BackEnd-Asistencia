@@ -22,6 +22,7 @@ public class TrabajadorController {
 
     private final TrabajadorService trabajadorService;
 
+    // CREAR — Solo ADMIN y SUPERADMIN
     @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN')")
     @PostMapping
     public ResponseEntity<TrabajadorResponseDTO> createTrabajador(
@@ -29,7 +30,9 @@ public class TrabajadorController {
         return new ResponseEntity<>(trabajadorService.crearTrabajador(request), HttpStatus.CREATED);
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'SUPERVISOR', 'TRABAJADOR')")
+    // EDITAR — Todos los roles autenticados
+    // (JEFE/SUPERVISOR/TRABAJADOR solo pueden editar su propio perfil; el servicio lo valida)
+    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'JEFE', 'SUPERVISOR', 'TRABAJADOR')")
     @PutMapping("/{id}")
     public ResponseEntity<TrabajadorResponseDTO> updateTrabajador(
             @PathVariable Long id,
@@ -44,7 +47,8 @@ public class TrabajadorController {
         return ResponseEntity.ok(trabajadorService.actualizarTrabajador(id, request, rol));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'SUPERVISOR')")
+    // LISTAR — ADMIN, SUPERADMIN, JEFE y SUPERVISOR (estos últimos solo lectura)
+    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'JEFE', 'SUPERVISOR')")
     @GetMapping
     public ResponseEntity<Page<TrabajadorResponseDTO>> getAllTrabajadores(
             @RequestParam(required = false, defaultValue = "ACTIVO") EstadoTrabajador estado,
@@ -52,21 +56,25 @@ public class TrabajadorController {
         return ResponseEntity.ok(trabajadorService.obtenerTodosLosTrabajadores(estado, pageable));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'SUPERVISOR', 'TRABAJADOR')")
+    // VER DETALLE — Todos los roles autenticados
+    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'JEFE', 'SUPERVISOR', 'TRABAJADOR')")
     @GetMapping("/{id}")
     public ResponseEntity<TrabajadorResponseDTO> getTrabajadorById(@PathVariable Long id) {
         return ResponseEntity.ok(trabajadorService.obtenerTrabajadorById(id));
     }
 
+    // CESAR — Solo ADMIN y SUPERADMIN
     @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN')")
     @PatchMapping("/{id}/cesar")
     public ResponseEntity<Void> cesarTrabajador(
             @PathVariable Long id,
-            @RequestParam(defaultValue = "Cese de actividades") String motivo) {
-        trabajadorService.cesarTrabajador(id, motivo);
+            @RequestParam(defaultValue = "Cese de actividades") String motivo,
+            @RequestParam(required = false) @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE) java.time.LocalDate fechaCese) {
+        trabajadorService.cesarTrabajador(id, motivo, fechaCese != null ? fechaCese : java.time.LocalDate.now());
         return ResponseEntity.noContent().build();
     }
 
+    // REINGRESAR — Solo ADMIN y SUPERADMIN
     @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN')")
     @PostMapping("/{id}/reingreso")
     public ResponseEntity<TrabajadorResponseDTO> reingresarTrabajador(
@@ -75,7 +83,8 @@ public class TrabajadorController {
         return ResponseEntity.ok(trabajadorService.reingresarTrabajador(id, idPuesto));
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'SUPERVISOR', 'TRABAJADOR')")
+    // BUSCAR — ADMIN, SUPERADMIN, JEFE, SUPERVISOR, TRABAJADOR (trabajador solo se ve a sí mismo)
+    @PreAuthorize("hasAnyRole('SUPERADMIN', 'ADMIN', 'JEFE', 'SUPERVISOR', 'TRABAJADOR')")
     @GetMapping("/buscar")
     public ResponseEntity<Page<TrabajadorResponseDTO>> buscar(
             @RequestParam String q,
@@ -84,6 +93,7 @@ public class TrabajadorController {
         return ResponseEntity.ok(trabajadorService.buscarTrabajadores(q, estado, pageable));
     }
 
+    // RESET PASSWORD — Solo SUPERADMIN
     @PreAuthorize("hasRole('SUPERADMIN')")
     @PostMapping("/{id}/reset-password")
     public ResponseEntity<String> resetearPassword(@PathVariable Long id) {

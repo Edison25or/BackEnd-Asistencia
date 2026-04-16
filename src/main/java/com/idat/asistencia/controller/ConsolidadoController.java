@@ -12,6 +12,8 @@ import com.idat.asistencia.dto.ConsolidadoDTOs.BolsaHistorialDTO;
 import com.idat.asistencia.dto.ConsolidadoDTOs.ConsolidadoReporteResponse;
 import java.util.List;
 
+import jakarta.validation.Valid;
+
 @RestController
 @RequestMapping("/api/consolidado")
 @RequiredArgsConstructor
@@ -51,21 +53,21 @@ public class ConsolidadoController {
     @PatchMapping("/{idConsolidado}")
     public ResponseEntity<ConsolidadoResponse> editar(
             @PathVariable Long idConsolidado,
-            @RequestBody EditarConsolidadoRequest req) {
+            @Valid @RequestBody EditarConsolidadoRequest req) {
         return ResponseEntity.ok(service.editar(idConsolidado, req));
     }
 
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
     @PostMapping("/cerrar")
     public ResponseEntity<CierreQuincenaResponse> cerrar(
-            @RequestBody CerrarQuincenaRequest req,
+            @Valid @RequestBody CerrarQuincenaRequest req,
             Authentication auth) {
         return ResponseEntity.ok(service.cerrarQuincena(req, auth.getName()));
     }
 
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN')")
     @PostMapping("/solicitar-reaper")
-    public ResponseEntity<Void> solicitarReapertura(@RequestBody ReaperturaRequest req) {
+    public ResponseEntity<Void> solicitarReapertura(@Valid @RequestBody ReaperturaRequest req) {
         service.solicitarReapertura(req);
         return ResponseEntity.ok().build();
     }

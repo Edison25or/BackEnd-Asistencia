@@ -284,20 +284,83 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
 
         int cerrados = 0;
 
+
+
+        // Tope de bolsa: ±480 minutos (8 horas)
+        final int TOPE_BOLSA = 480;
+
         for (ConsolidadoQuincena c : consolidados) {
             if ("CERRADO".equals(c.getEstado())) { cerrados++; continue; }
 
             DecisionExtraDTO dec = decisiones.get(c.getTrabajador().getIdTrabajador());
 
+            int E  = c.getTotalExtraMinutos();                              // extras de esta quincena
+            int BE = c.getBolsaEntrada() != null ? c.getBolsaEntrada() : 0; // bolsa entrada
+
+            int P, C, aBolsa;
+
             if (dec != null) {
-                c.setMinExtraPagados(dec.getMinExtraPagados() != null ? dec.getMinExtraPagados() : 0);
-                c.setMinExtraABolsa (dec.getMinExtraABolsa()  != null ? dec.getMinExtraABolsa()  : 0);
-                c.setBolsaConsumida (dec.getBolsaConsumida()  != null ? dec.getBolsaConsumida()  : 0);
+                P = dec.getMinExtraPagados() != null ? dec.getMinExtraPagados() : 0;
+                C = dec.getBolsaConsumida()  != null ? dec.getBolsaConsumida()  : 0;
+
+                // ── Validaciones de Pagar ─────────────────────────
+                if (P < 0 || C < 0) {
+                    throw new BusinessException("Los valores no pueden ser negativos.");
+                }
+
+                // Máximo a pagar:
+                //   - Si bolsa entrada es NEGATIVA: solo puede pagar sus extras (E)
+                //   - Si bolsa entrada es POSITIVA: puede pagar E + BE
+                int maxPagar = Math.max(0, E + BE);
+
+                // Mínimo a pagar (para no exceder +480 en bolsa salida):
+                //   Solo aplica si E + BE > 480
+                int minPagar = Math.max(0, (E + Math.max(0, BE)) - TOPE_BOLSA);
+
+                if (P > maxPagar) {
+                    throw new BusinessException(
+                            "Trabajador " + c.getTrabajador().getPNombre() + " " + c.getTrabajador().getAPaterno()
+                                    + ": no se puede pagar " + P + " min. Máximo: " + maxPagar + ".");
+                }
+                if (P < minPagar) {
+                    throw new BusinessException(
+                            "Trabajador " + c.getTrabajador().getPNombre() + " " + c.getTrabajador().getAPaterno()
+                                    + ": debe pagar al menos " + minPagar
+                                    + " min para que la bolsa no exceda 480 a favor.");
+                }
+
+                // ── Calcular A Bolsa automáticamente ───────────────
+                // Si paga menos o igual a E → el resto va a bolsa
+                // Si paga más que E → consume de bolsa para cubrir la diferencia
+                if (P <= E) {
+                    aBolsa = E - P;
+                } else {
+                    aBolsa = 0;
+                    int consumoObligado = P - E;
+                    if (C < consumoObligado) C = consumoObligado;
+                }
+
+                // ── Validación de Consumir ─────────────────────────
+                // Máximo consumir: BE + aBolsa + 480 (no más negativo que -480)
+                int maxConsumir = BE + aBolsa + TOPE_BOLSA;
+                if (C > maxConsumir) {
+                    throw new BusinessException(
+                            "Trabajador " + c.getTrabajador().getPNombre() + " " + c.getTrabajador().getAPaterno()
+                                    + ": no se puede consumir " + C + " min. Máximo: " + maxConsumir
+                                    + " (la bolsa no puede pasar de 480 min en contra).");
+                }
+
             } else {
-                // Default: pagar todos los extras
-                c.setMinExtraPagados(c.getTotalExtraMinutos());
-                c.setMinExtraABolsa(0);
+                // Default: pagar todos los extras, no tocar bolsa
+                P = E;
+                aBolsa = 0;
+                C = 0;
             }
+
+            c.setMinExtraPagados(P);
+            c.setMinExtraABolsa (aBolsa);
+            c.setBolsaAcumulada (aBolsa);   // ← sin esto la bolsa no crece
+            c.setBolsaConsumida (C);
 
             c.recalcularBolsaSalida();
             c.setEstado("CERRADO");
@@ -476,22 +539,19 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
         List<ConsolidadoQuincena> lista =
                 consolidadoRepo.findByQuincena_IdQuincenaOrderByTrabajador_APaterno(idQuincena);
 
-        // Totales globales
+        // Totales globales (usa nz() para tratar nulls como 0)
         int totNormDia = 0, totNormNoche = 0;
         int totExtDia  = 0, totExtNoche  = 0;
         int totFaltas  = 0, totPermisos  = 0;
 
         for (ConsolidadoQuincena c : lista) {
-            totNormDia   += c.getMinNormalesDia()   + c.getMinNormalesNoche(); // día
-            totNormNoche += c.getMinNormalesNoche();
-            totExtDia    += c.getMinExtraDiaA()  + c.getMinExtraDiaB();
-            totExtNoche  += c.getMinExtranocheA() + c.getMinExtraNocheB();
-            totFaltas    += c.getDiasFalta();
-            totPermisos  += c.getDiasPermiso();
+            totNormDia   += nz(c.getMinNormalesDia());
+            totNormNoche += nz(c.getMinNormalesNoche());
+            totExtDia    += nz(c.getMinExtraDiaA())    + nz(c.getMinExtraDiaB());
+            totExtNoche  += nz(c.getMinExtranocheA())  + nz(c.getMinExtraNocheB());
+            totFaltas    += nz(c.getDiasFalta());
+            totPermisos  += nz(c.getDiasPermiso());
         }
-        // recalcular totNormDia sin doble suma
-        totNormDia = 0;
-        for (ConsolidadoQuincena c : lista) totNormDia += c.getMinNormalesDia();
 
         int totGeneral = totNormDia + totNormNoche + totExtDia + totExtNoche;
 
@@ -511,6 +571,11 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
                 .totalDiasPermiso(totPermisos)
                 .totalTrabajadores(lista.size())
                 .build();
+    }
+
+    /** Helper null-safe: devuelve 0 si el valor es null. */
+    private int nz(Integer val) {
+        return val != null ? val : 0;
     }
 
     // ════════════════════════════════════════════════════════════
@@ -535,6 +600,13 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
         Trabajador t = c.getTrabajador();
         int totalNorm  = c.getTotalNormalesMinutos();
         int totalExtra = c.getTotalExtraMinutos();
+
+        // Minutos que "debe" esta quincena = faltas + tardanzas + salidas tempranas
+        int minDiaDesc   = c.getMinDiaDescontar()     != null ? c.getMinDiaDescontar()     : 0;
+        int minNocheDesc = c.getMinNocheDescontar()   != null ? c.getMinNocheDescontar()   : 0;
+        int minTardanza  = c.getMinTotalTardanza()    != null ? c.getMinTotalTardanza()    : 0;
+        int minSalTemp   = c.getMinTotalSalTemprana() != null ? c.getMinTotalSalTemprana() : 0;
+        int debe         = minDiaDesc + minNocheDesc + minTardanza + minSalTemp;
 
         return ConsolidadoResponse.builder()
                 .id(c.getId())
@@ -578,6 +650,11 @@ public class ConsolidadoServiceImpl implements ConsolidadoService {
                 .observaciones(c.getObservaciones())
                 .minExtraPagados(c.getMinExtraPagados())
                 .minExtraABolsa(c.getMinExtraABolsa())
+                .minDebe(debe)
+                .hExtraPagados(fmt(c.getMinExtraPagados()))
+                .hExtraABolsa(fmt(c.getMinExtraABolsa()))
+                .hBolsaConsumida(fmt(c.getBolsaConsumida()))
+                .hDebe(fmt(debe))
                 .estado(c.getEstado())
                 .generadoEn(c.getGeneradoEn() != null ? c.getGeneradoEn().toString() : null)
                 .cerradoEn(c.getCerradoEn()   != null ? c.getCerradoEn().toString()   : null)

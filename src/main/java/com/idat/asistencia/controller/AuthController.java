@@ -3,9 +3,6 @@ package com.idat.asistencia.controller;
 import com.idat.asistencia.dto.AuthDTOs.AuthResponse;
 import com.idat.asistencia.dto.AuthDTOs.LoginRequest;
 import com.idat.asistencia.dto.AuthDTOs.RecuperarPasswordRequest;
-import com.idat.asistencia.exception.ResourceNotFoundException;
-import com.idat.asistencia.model.entity.Trabajador;
-import com.idat.asistencia.model.entity.Usuario;
 import com.idat.asistencia.repository.UsuarioRepository;
 import com.idat.asistencia.security.JwtService;
 import lombok.RequiredArgsConstructor;
@@ -37,26 +34,20 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token));
     }
 
-
     @PostMapping("/recuperar-password")
     public ResponseEntity<String> recuperarPassword(@RequestBody RecuperarPasswordRequest request) {
-        Usuario usuario = usuarioRepository.findByUsername(request.email())
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "No existe una cuenta asociada a ese correo electrónico."));
+        // Mensaje genérico: devolvemos lo mismo existe o no el email.
+        // Esto evita que atacantes puedan descubrir qué correos están registrados.
+        String mensajeGenerico = "Si el correo está registrado, contacta al administrador del sistema " +
+                "para que restablezca tu contraseña.";
 
-        // La nueva contraseña será el nroDocumento del trabajador vinculado
-        Trabajador trabajador = usuario.getTrabajador();
-        if (trabajador == null) {
-            throw new ResourceNotFoundException(
-                    "No se encontró un trabajador vinculado a esta cuenta.");
+        // Validación básica del email
+        if (request.email() == null || request.email().isBlank()) {
+            return ResponseEntity.ok(mensajeGenerico);
         }
 
-        String nuevaPassword = passwordEncoder.encode(trabajador.getNroDocumento());
-        usuario.setPassword(nuevaPassword);
-        usuarioRepository.save(usuario);
-
-        return ResponseEntity.ok(
-                "Contraseña restablecida. Tu nueva clave es tu número de documento (" +
-                        trabajador.getNroDocumento() + ").");
+        // No reseteamos automáticamente. El reset ahora es responsabilidad del SuperAdmin
+        // mediante el endpoint /api/trabajadores/{id}/reset-password
+        return ResponseEntity.ok(mensajeGenerico);
     }
 }

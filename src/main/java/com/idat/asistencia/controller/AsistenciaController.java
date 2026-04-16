@@ -2,6 +2,8 @@ package com.idat.asistencia.controller;
 
 import com.idat.asistencia.dto.AsistenciaDTOs.*;
 import com.idat.asistencia.service.AsistenciaService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -45,7 +47,7 @@ public class AsistenciaController {
     }
 
     // ── Revisión de asistencias ───────────────────────────────
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @GetMapping("/revision/{idQuincena}")
     public ResponseEntity<List<AsistenciaRevisionDTO>> revision(
             @PathVariable Long idQuincena) {
@@ -55,7 +57,7 @@ public class AsistenciaController {
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PatchMapping("/validar-tiempos")
     public ResponseEntity<AsistenciaRevisionDTO> validar(
-            @RequestBody ValidarTiemposRequest req,
+            @Valid @RequestBody ValidarTiemposRequest req,
             Authentication auth) {
         return ResponseEntity.ok(service.validarTiempos(req, auth.getName()));
     }
@@ -63,7 +65,7 @@ public class AsistenciaController {
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping("/no-programada")
     public ResponseEntity<AsistenciaRevisionDTO> registrarNoProgramada(
-            @RequestBody RegistrarNoProgramadaRequest req) {
+            @Valid @RequestBody RegistrarNoProgramadaRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(service.registrarNoProgramada(req));
     }
@@ -78,15 +80,26 @@ public class AsistenciaController {
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping("/quincenas")
     public ResponseEntity<QuincenaResumenDTO> crearQuincena(
-            @RequestBody CrearQuincenaRequest req) {
+            @Valid @RequestBody CrearQuincenaRequest req) {
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(service.crearQuincena(req.getAnio(), req.getMes(), req.getNumero()));
     }
 
     @Data
     public static class CrearQuincenaRequest {
+        @NotNull(message = "El año es obligatorio")
+        @Min(value = 2020, message = "El año debe ser 2020 o posterior")
+        @Max(value = 2100, message = "El año no puede ser mayor a 2100")
         private Integer anio;
+
+        @NotNull(message = "El mes es obligatorio")
+        @Min(value = 1, message = "El mes debe estar entre 1 y 12")
+        @Max(value = 12, message = "El mes debe estar entre 1 y 12")
         private Integer mes;
+
+        @NotNull(message = "El número de quincena es obligatorio")
+        @Min(value = 1, message = "La quincena debe ser 1 (1-15) o 2 (16-fin)")
+        @Max(value = 2, message = "La quincena debe ser 1 (1-15) o 2 (16-fin)")
         private Integer numero;
     }
 }

@@ -14,7 +14,7 @@ public interface TrabajadorService {
 
     Page<TrabajadorResponseDTO> obtenerTodosLosTrabajadores(EstadoTrabajador estado, Pageable pageable);
     TrabajadorResponseDTO obtenerTrabajadorById(Long id);
-    void cesarTrabajador(Long id, String motivo);
+    void cesarTrabajador(Long id, String motivo, java.time.LocalDate fechaCese);
     TrabajadorResponseDTO reingresarTrabajador(Long id, Integer idPuesto);
     Page<TrabajadorResponseDTO> buscarTrabajadores(String q, EstadoTrabajador estado, Pageable pageable);
     void resetearPassword(Long id);

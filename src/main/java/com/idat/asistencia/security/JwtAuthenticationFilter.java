@@ -42,6 +42,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         jwt = authHeader.substring(7);
 
         // ← ENVOLVER EN TRY-CATCH
+        // ── Validar y procesar el token ─────────────────────────
         try {
             username = jwtService.extractUsername(jwt);
 
@@ -59,23 +60,27 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                     SecurityContextHolder.getContext().setAuthentication(authToken);
                 }
             }
-
-            filterChain.doFilter(request, response);
-
         } catch (io.jsonwebtoken.ExpiredJwtException e) {
-            // Token expirado → devolver 401 directamente
+            // Token expirado → 401
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json");
             response.getWriter().write(
                     "{\"status\":401,\"message\":\"Sesión expirada. Inicia sesión nuevamente.\"}"
             );
-        } catch (Exception e) {
-            // Cualquier otro error de JWT → 401
+            return;
+        } catch (io.jsonwebtoken.JwtException e) {
+            // Error de token (firma inválida, malformado, etc.) → 401
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
             response.setContentType("application/json");
             response.getWriter().write(
                     "{\"status\":401,\"message\":\"Token inválido.\"}"
             );
+            return;
         }
+
+        // ── Continuar la cadena FUERA del try/catch ─────────────
+        // Las excepciones del controller/servicio NO deben interpretarse como token inválido.
+        filterChain.doFilter(request, response);
+
     }
 }

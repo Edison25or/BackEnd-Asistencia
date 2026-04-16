@@ -4,6 +4,8 @@ import lombok.Builder;
 import lombok.Data;
 import java.math.BigDecimal;
 import java.util.List;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.*;
 
 public class ConsolidadoDTOs {
 
@@ -68,6 +70,11 @@ public class ConsolidadoDTOs {
         // Decisiones extra
         private Integer minExtraPagados;
         private Integer minExtraABolsa;
+        private Integer minDebe;
+        private String  hExtraPagados;     // ← hh:mm de minExtraPagados
+        private String  hExtraABolsa;      // ← hh:mm de minExtraABolsa
+        private String  hBolsaConsumida;   // ← hh:mm de bolsaConsumida (ya existe el minuto)
+        private String  hDebe;             // ← hh:mm de minDebe
 
         // Estado
         private String estado;
@@ -78,30 +85,45 @@ public class ConsolidadoDTOs {
     // ── Request para editar campos manuales ──────────────────
     @Data
     public static class EditarConsolidadoRequest {
+        @DecimalMin(value = "0.0", message = "El bono no puede ser negativo")
+        @DecimalMax(value = "99999.99", message = "El bono excede el límite permitido")
         private BigDecimal otroBono;
+
+        @Size(max = 200, message = "El detalle del bono no puede exceder 200 caracteres")
         private String     detalleOtroBono;
+
+        @Size(max = 500, message = "Las observaciones no pueden exceder 500 caracteres")
         private String     observaciones;
     }
 
     // ── Request para cerrar quincena (con decisiones de bolsa) ─
     @Data
     public static class CerrarQuincenaRequest {
+        @NotNull(message = "El ID de la quincena es obligatorio")
         private Long   idQuincena;
         /**
          * Decisiones por trabajador. Si no se envía uno,
          * se asume que todos los extras se pagan.
          */
+        @Valid
         private List<DecisionExtraDTO> decisiones;
     }
 
     @Data
     public static class DecisionExtraDTO {
+        @NotNull(message = "El ID del trabajador es obligatorio")
         private Long    idTrabajador;
+
         /** Minutos que se pagan al 100% (ya incluyen sobretasa) */
+        @Min(value = 0, message = "Los minutos pagados no pueden ser negativos")
         private Integer minExtraPagados;
+
         /** Minutos que van a la bolsa */
+        @Min(value = 0, message = "Los minutos a bolsa no pueden ser negativos")
         private Integer minExtraABolsa;
+
         /** Minutos de la bolsa que se consumen esta quincena */
+        @Min(value = 0, message = "Los minutos consumidos no pueden ser negativos")
         private Integer bolsaConsumida;
     }
 
@@ -118,7 +140,11 @@ public class ConsolidadoDTOs {
     // ── Request para reapertura ───────────────────────────────
     @Data
     public static class ReaperturaRequest {
+        @NotNull(message = "El ID de la quincena es obligatorio")
         private Long   idQuincena;
+
+        @NotBlank(message = "El motivo de la reapertura es obligatorio")
+        @Size(min = 10, max = 500, message = "El motivo debe tener entre 10 y 500 caracteres")
         private String motivo;
     }
 

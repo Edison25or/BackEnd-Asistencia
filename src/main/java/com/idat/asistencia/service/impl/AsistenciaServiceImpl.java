@@ -7,6 +7,7 @@ import com.idat.asistencia.exception.ResourceNotFoundException;
 import com.idat.asistencia.model.entity.*;
 import com.idat.asistencia.model.enums.*;
 import com.idat.asistencia.repository.*;
+import com.idat.asistencia.security.SecurityHelper;
 import com.idat.asistencia.service.AsistenciaService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,7 @@ public class AsistenciaServiceImpl implements AsistenciaService {
     private final HorarioDiaRepository          horarioDiaRepo;
     private final QuincenaRepository            quincenaRepo;
     private final UsuarioRepository             usuarioRepo;
+    private final SecurityHelper                securityHelper;
 
     // ── Hora límite para clasificar turno nocturno ─────────────
     private static final LocalTime NOCTURNO_INICIO = LocalTime.of(19, 0);
@@ -214,20 +216,57 @@ public class AsistenciaServiceImpl implements AsistenciaService {
     // REVISIÓN DE ASISTENCIAS
     // ════════════════════════════════════════════════════════════
 
-    /** Lista todas las asistencias de una quincena para el formulario de revisión */
+    /**
+     * Lista las asistencias de una quincena para el formulario de revisión.
+     * Si el usuario es JEFE, solo muestra asistencias de trabajadores de su área.
+     * Si es ADMIN o SUPERADMIN, muestra todas.
+     */
     @Override
     public List<AsistenciaRevisionDTO> getParaRevision(Long idQuincena) {
-        return asistenciaRepo.findByQuincena(idQuincena)
-                .stream().map(this::toRevisionDTO).collect(Collectors.toList());
+        List<Asistencia> asistencias = asistenciaRepo.findByQuincena(idQuincena);
+
+        // Si es JEFE, filtrar por su área
+        if (securityHelper.esJefe()) {
+            Integer idAreaJefe = securityHelper.getIdAreaJefeAutenticado();
+            if (idAreaJefe == null) {
+                // JEFE sin área asignada → lista vacía (no error)
+                return List.of();
+            }
+            asistencias = asistencias.stream()
+                    .filter(a -> a.getTrabajador() != null
+                            && a.getTrabajador().getPuesto() != null
+                            && a.getTrabajador().getPuesto().getArea() != null
+                            && idAreaJefe.equals(a.getTrabajador().getPuesto().getArea().getIdArea()))
+                    .collect(Collectors.toList());
+        }
+
+        return asistencias.stream().map(this::toRevisionDTO).collect(Collectors.toList());
     }
 
-    /** Valida los tiempos no programados de una asistencia */
+    /**
+     * Valida los tiempos no programados de una asistencia.
+     * Si el usuario es JEFE, verifica que el trabajador de la asistencia sea de su área.
+     */
     @Override
     @Transactional
     public AsistenciaRevisionDTO validarTiempos(ValidarTiemposRequest req,
                                                 String usernameRevisor) {
         Asistencia a = asistenciaRepo.findById(req.getIdAsistencia())
                 .orElseThrow(() -> new ResourceNotFoundException("Asistencia no encontrada."));
+
+        // Si es JEFE, verificar que la asistencia pertenezca a un trabajador de su área
+        if (securityHelper.esJefe()) {
+            Integer idAreaJefe = securityHelper.getIdAreaJefeAutenticado();
+            Integer idAreaTrabajador = (a.getTrabajador() != null
+                    && a.getTrabajador().getPuesto() != null
+                    && a.getTrabajador().getPuesto().getArea() != null)
+                    ? a.getTrabajador().getPuesto().getArea().getIdArea() : null;
+
+            if (idAreaJefe == null || !idAreaJefe.equals(idAreaTrabajador)) {
+                throw new BusinessException(
+                        "No tienes permiso para validar asistencias de trabajadores de otra área.");
+            }
+        }
 
         // No se puede revisar lo que ya está consolidado
         if (a.getEstado() == EstadoAsistencia.CONSOLIDADO)
@@ -313,8 +352,7 @@ public class AsistenciaServiceImpl implements AsistenciaService {
                 .orElseThrow(() -> new ResourceNotFoundException("Quincena no encontrada."));
 
         for (ProgramacionSemanal prog : programaciones) {
-            Trabajador t  = prog.getTrabajador();
-            // Determinar los días del esquema dentro del período
+            Trabajador t = prog.getTrabajador();
             LocalDate inicio = prog.getSemanaInicio();
             LocalDate fin    = prog.getSemanaFin();
 

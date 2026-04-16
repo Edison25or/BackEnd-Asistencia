@@ -1,8 +1,8 @@
 package com.idat.asistencia.dto;
 
+import jakarta.validation.constraints.*;
 import lombok.Builder;
 import lombok.Data;
-import java.util.List;
 
 public class AsistenciaDTOs {
 
@@ -95,20 +95,47 @@ public class AsistenciaDTOs {
     // ── Request para validar tiempos desde el frontend ────────
     @Data
     public static class ValidarTiemposRequest {
+        @NotNull(message = "El ID de asistencia es obligatorio")
         private Long    idAsistencia;
-        private Integer valMinPrevIng;   // minutos previos que se validan
-        private Integer valMinPostSal;   // minutos posteriores que se validan
+
+        @Min(value = 0, message = "Los minutos no pueden ser negativos")
+        @Max(value = 720, message = "Los minutos no pueden superar las 12 horas")
+        private Integer valMinPrevIng;
+
+        @Min(value = 0, message = "Los minutos no pueden ser negativos")
+        @Max(value = 720, message = "Los minutos no pueden superar las 12 horas")
+        private Integer valMinPostSal;
+
+        @Size(max = 500, message = "La observación no puede exceder 500 caracteres")
         private String  observacion;
-        private String  tipo;            // puede cambiar FALTA → PERMISO
+
+        @Pattern(regexp = "^$|^(FALTA|PERMISO|PROGRAMADA|NO_PROGRAMADA)$",
+                message = "Tipo de asistencia inválido")
+        private String  tipo;
     }
 
     // ── Request para crear asistencia no programada ───────────
     @Data
     public static class RegistrarNoProgramadaRequest {
+        @NotNull(message = "El ID del trabajador es obligatorio")
         private Long   idTrabajador;
-        private String fecha;        // yyyy-MM-dd
-        private String ingresoReal;  // HH:mm
-        private String salidaReal;   // HH:mm
+
+        @NotBlank(message = "La fecha es obligatoria")
+        @Pattern(regexp = "^\\d{4}-\\d{2}-\\d{2}$",
+                message = "La fecha debe tener formato yyyy-MM-dd")
+        private String fecha;
+
+        @NotBlank(message = "La hora de ingreso es obligatoria")
+        @Pattern(regexp = "^([01]\\d|2[0-3]):[0-5]\\d$",
+                message = "La hora de ingreso debe tener formato HH:mm")
+        private String ingresoReal;
+
+        @NotBlank(message = "La hora de salida es obligatoria")
+        @Pattern(regexp = "^([01]\\d|2[0-3]):[0-5]\\d$",
+                message = "La hora de salida debe tener formato HH:mm")
+        private String salidaReal;
+
+        @Size(max = 500, message = "La observación no puede exceder 500 caracteres")
         private String observacion;
     }
 

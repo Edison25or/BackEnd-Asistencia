@@ -15,8 +15,14 @@ public interface ConsolidadoRepository extends JpaRepository<ConsolidadoQuincena
     Optional<ConsolidadoQuincena> findByQuincena_IdQuincenaAndTrabajador_IdTrabajador(
             Long idQuincena, Long idTrabajador);
 
+    @Query("""
+        SELECT c FROM ConsolidadoQuincena c
+        LEFT JOIN c.trabajador t
+        WHERE c.quincena.idQuincena = :idQuincena
+        ORDER BY t.aPaterno ASC, t.aMaterno ASC, t.pNombre ASC
+    """)
     List<ConsolidadoQuincena> findByQuincena_IdQuincenaOrderByTrabajador_APaterno(
-            Long idQuincena);
+            @Param("idQuincena") Long idQuincena);
 
     /** Último consolidado cerrado de un trabajador (para obtener bolsa_salida) */
     @Query("""

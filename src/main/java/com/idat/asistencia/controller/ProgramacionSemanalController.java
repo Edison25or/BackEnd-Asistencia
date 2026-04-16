@@ -25,7 +25,7 @@ public class ProgramacionSemanalController {
         return ResponseEntity.ok(service.getAll());
     }
 
-    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','SUPERVISOR','TRABAJADOR')")
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE','SUPERVISOR','TRABAJADOR')")
     @GetMapping("/semana/{fecha}")
     public ResponseEntity<List<ProgramacionResponse>> getBySemana(@PathVariable String fecha) {
         return ResponseEntity.ok(service.getBySemana(fecha));

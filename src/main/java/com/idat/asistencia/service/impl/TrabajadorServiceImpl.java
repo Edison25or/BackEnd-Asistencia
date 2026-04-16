@@ -45,6 +45,25 @@ public class TrabajadorServiceImpl implements TrabajadorService {
     @Override
     @Transactional
     public TrabajadorResponseDTO crearTrabajador(TrabajadorRequestDTO dto) {
+
+        // ── Validaciones de negocio ─────────────────────────────
+        // 1. Unicidad de documento
+        if (trabajadorRepository.existsByNroDocumento(dto.getNroDocumento())) {
+            throw new BusinessException("Ya existe un trabajador con el documento " + dto.getNroDocumento());
+        }
+        // 2. Unicidad de email
+        if (trabajadorRepository.existsByEmail(dto.getEmail())) {
+            throw new BusinessException("Ya existe un trabajador con el email " + dto.getEmail());
+        }
+        // 3. Formato de documento según tipo
+        validarFormatoDocumento(dto.getDocIdentidad(), dto.getNroDocumento());
+
+        // 4. Edad mínima: 18 años
+        if (dto.getFechaNac().plusYears(18).isAfter(LocalDate.now())) {
+            throw new BusinessException("El trabajador debe tener al menos 18 años.");
+        }
+
+        // ── Construcción de la entidad ──────────────────────────
         Trabajador trabajador = trabajadorMapper.toEntity(dto);
         trabajador.setEstado(EstadoTrabajador.ACTIVO);
 
@@ -75,10 +94,9 @@ public class TrabajadorServiceImpl implements TrabajadorService {
     public TrabajadorResponseDTO actualizarTrabajador(Long id, TrabajadorRequestDTO dto,
                                                       String rolEditor) {
 
-        // Si es TRABAJADOR, verificar que solo edite su propio perfil
-        if ("ROLE_TRABAJADOR".equals(rolEditor)) {
-            securityHelper.verificarAccesoPropio(id);
-        }
+        // JEFE, SUPERVISOR y TRABAJADOR solo pueden editar su propio perfil.
+        // ADMIN y SUPERADMIN pueden editar cualquier perfil.
+        securityHelper.verificarAccesoPropioOAdmin(id);
 
         Trabajador t = trabajadorRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Trabajador no encontrado: " + id));
@@ -96,6 +114,14 @@ public class TrabajadorServiceImpl implements TrabajadorService {
             throw new BusinessException("El email " + dto.getEmail() + " ya está en uso.");
         if (docCambio && trabajadorRepository.existsByNroDocumento(dto.getNroDocumento()))
             throw new BusinessException("El documento " + dto.getNroDocumento() + " ya está en uso.");
+
+        // Validar formato del documento según tipo
+        validarFormatoDocumento(dto.getDocIdentidad(), dto.getNroDocumento());
+
+        // Validar edad mínima
+        if (dto.getFechaNac().plusYears(18).isAfter(LocalDate.now())) {
+            throw new BusinessException("El trabajador debe tener al menos 18 años.");
+        }
 
         Map<String, String[]> cambios = new LinkedHashMap<>();
         capturar(cambios, "docIdentidad",         t.getDocIdentidad(),        dto.getDocIdentidad());
@@ -178,8 +204,9 @@ public class TrabajadorServiceImpl implements TrabajadorService {
 
     @Override
     public TrabajadorResponseDTO obtenerTrabajadorById(Long id) {
-        // V1 FIX: Si es TRABAJADOR, solo puede consultar su propio perfil
-        securityHelper.verificarAccesoPropio(id);
+        // Solo ADMIN/SUPERADMIN pueden ver cualquier perfil.
+        // JEFE, SUPERVISOR y TRABAJADOR solo pueden ver su propio perfil.
+        securityHelper.verificarAccesoPropioOAdmin(id);
 
         Trabajador t = trabajadorRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Trabajador no encontrado: " + id));
@@ -209,26 +236,44 @@ public class TrabajadorServiceImpl implements TrabajadorService {
     // ── CESAR ─────────────────────────────────────────────────
     @Override
     @Transactional
-    public void cesarTrabajador(Long id, String motivo) {
+    public void cesarTrabajador(Long id, String motivo, LocalDate fechaCese) {
         Trabajador t = trabajadorRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Trabajador no encontrado: " + id));
+
+        if (t.getEstado() == EstadoTrabajador.INACTIVO) {
+            throw new BusinessException("El trabajador ya se encuentra INACTIVO.");
+        }
+
+        // Validar que la fecha de cese no sea futura
+        if (fechaCese.isAfter(LocalDate.now())) {
+            throw new BusinessException("La fecha de cese no puede ser una fecha futura.");
+        }
+
+        // Validar que la fecha de cese no sea anterior a la fecha de ingreso
+        periodoLaboralRepository.findPeriodoActivo(id).ifPresent(p -> {
+            if (fechaCese.isBefore(p.getFechaIngreso())) {
+                throw new BusinessException("La fecha de cese no puede ser anterior a la fecha de ingreso ("
+                        + p.getFechaIngreso() + ").");
+            }
+        });
 
         t.setEstado(EstadoTrabajador.INACTIVO);
         if (t.getUsuario() != null) t.getUsuario().setEnabled(false);
 
         periodoLaboralRepository.findPeriodoActivo(id).ifPresent(p -> {
-            p.setFechaCese(LocalDate.now());
+            p.setFechaCese(fechaCese);
             p.setMotivoCese(motivo);
             periodoLaboralRepository.save(p);
         });
         historialPuestoRepository.findPuestoActivo(id).ifPresent(h -> {
-            h.setFechaFin(LocalDate.now());
+            h.setFechaFin(fechaCese);
             h.setMotivoCambio("Cese del trabajador: " + motivo);
             historialPuestoRepository.save(h);
         });
 
         trabajadorRepository.save(t);
-        auditoriaService.registrarCampo(TABLA, id, "CESAR", "motivo", null, motivo);
+        auditoriaService.registrarCampo(TABLA, id, "CESAR", "motivo", null,
+                motivo + " | Fecha cese: " + fechaCese);
     }
 
     // ── REINGRESAR ────────────────────────────────────────────
@@ -293,5 +338,27 @@ public class TrabajadorServiceImpl implements TrabajadorService {
 
     private String strOrNull(Object o) {
         return o == null ? null : o.toString();
+    }
+
+    private void validarFormatoDocumento(String tipo, String numero) {
+        switch (tipo) {
+            case "DNI":
+                if (!numero.matches("^\\d{8}$")) {
+                    throw new BusinessException("El DNI debe tener exactamente 8 dígitos numéricos.");
+                }
+                break;
+            case "CE":
+                if (!numero.matches("^\\d{9,12}$")) {
+                    throw new BusinessException("El Carnet de Extranjería debe tener entre 9 y 12 dígitos.");
+                }
+                break;
+            case "PASAPORTE":
+                if (!numero.matches("^[a-zA-Z0-9]{6,20}$")) {
+                    throw new BusinessException("El Pasaporte debe tener entre 6 y 20 caracteres alfanuméricos.");
+                }
+                break;
+            default:
+                throw new BusinessException("Tipo de documento no válido.");
+        }
     }
 }
