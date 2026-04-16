@@ -37,10 +37,7 @@ public class AuthController {
         return ResponseEntity.ok(new AuthResponse(token));
     }
 
-    /**
-     * Recuperar contraseña: resetea la clave al número de documento del trabajador.
-     * No requiere autenticación (es pública en SecurityConfig).
-     */
+
     @PostMapping("/recuperar-password")
     public ResponseEntity<String> recuperarPassword(@RequestBody RecuperarPasswordRequest request) {
         Usuario usuario = usuarioRepository.findByUsername(request.email())

@@ -53,7 +53,6 @@ public interface AsistenciaRepository extends JpaRepository<Asistencia, Long> {
             @Param("desde")        LocalDate desde,
             @Param("hasta")        LocalDate hasta
     );
-
     /** Todas las asistencias de una quincena para revisión */
     @Query("""
         SELECT a FROM Asistencia a
@@ -65,7 +64,6 @@ public interface AsistenciaRepository extends JpaRepository<Asistencia, Long> {
         ORDER BY t.aPaterno ASC, t.pNombre ASC, a.fecha ASC
     """)
     List<Asistencia> findByQuincena(@Param("idQuincena") Long idQuincena);
-
     /** Asistencias de una quincena por trabajador */
     @Query("""
         SELECT a FROM Asistencia a

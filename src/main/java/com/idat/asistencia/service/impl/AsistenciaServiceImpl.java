@@ -65,6 +65,7 @@ public class AsistenciaServiceImpl implements AsistenciaService {
         Asistencia asistencia = asistenciaRepo
                 .findByTrabajador_IdTrabajadorAndFecha(idTrabajador, hoy)
                 .orElse(null);
+        // ... lógica de cálculo de tardanza y tiempo extra
 
         // Buscar programación y datos del esquema del día
         Optional<ProgramacionSemanal> progOpt =
