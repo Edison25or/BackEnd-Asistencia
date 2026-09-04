@@ -1,26 +1,26 @@
 package com.idat.asistencia.dto;
 
+import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Builder;
 import lombok.Data;
+
 import java.util.List;
 
 public class ProgramacionDTOs {
 
     @Data
     public static class ProgramacionRequest {
-        @NotNull(message = "La fecha de inicio (sábado) es obligatoria")
-        private String semanaInicio;
+        @NotBlank(message = "La semana de inicio es obligatoria")
+        private String  semanaInicio;
 
         @NotNull(message = "El esquema es obligatorio")
         private Integer idEsquema;
 
-        private Long       idTrabajador;
-        private List<Long> idsTrabajadores;
+        private Long    idTrabajador;
     }
 
-    @Data
-    @Builder
+    @Data @Builder
     public static class ProgramacionResponse {
         private Long    idProgramacion;
         private String  semanaInicio;
@@ -28,34 +28,40 @@ public class ProgramacionDTOs {
         private String  semanaLabel;
         private Integer idEsquema;
         private String  esquemaNombre;
+        /** Turno del esquema. Determina la clasificacion de horas (RN-18). */
+        private String  turnoNombre;
         private Long    idTrabajador;
         private String  trabajadorNombre;
         private String  trabajadorDocumento;
         private String  puestoNombre;
         private String  areaNombre;
 
-        // Snapshot del grupo — para reconstrucción visual de tarjetas
         private Integer grupoIdSnapshot;
         private String  grupoNombreSnapshot;
 
-        // Indica si la semana ya pasó — el frontend lo usa para
-        // mostrar la vista en solo lectura (sin botón quitar)
         private boolean semanaPassada;
     }
 
-    // ── Respuesta al confirmar semana (genera pre-registros) ──
+    /**
+     * Resultado de confirmar la semana.
+     *
+     * idQuincena pasa a ser una LISTA: una semana que cruza el corte del
+     * 15 o de fin de mes genera pre-registros de DOS quincenas distintas,
+     * y eso es correcto.
+     */
     @Data @Builder
     public static class ConfirmarSemanaResponse {
-        private String semanaLabel;
-        private int    totalTrabajadores;
-        private int    preRegistrosCreados;
-        private int    preRegistrosOmitidos;
-        private String quincenaDescripcion;
-        private Long   idQuincena;
+        private String     semanaLabel;
+        private int        totalTrabajadores;
+        private int        preRegistrosCreados;
+        private int        preRegistrosOmitidos;
+        /** Cuantos de los creados caen en dia feriado (RN-41). */
+        private int        preRegistrosEnFeriado;
+        private String     quincenaDescripcion;
+        private List<Long> idsQuincenas;
     }
 
-    @Data
-    @Builder
+    @Data @Builder
     public static class ProgramacionBulkResponse {
         private int    creados;
         private int    omitidos;

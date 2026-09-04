@@ -6,93 +6,128 @@ import lombok.Data;
 
 public class AsistenciaDTOs {
 
-    // ── Respuesta al marcar (compatible con lo existente) ─────
+    /**
+     * Respuesta del lector.
+     *
+     * accion puede ser ENTRADA, SALIDA, CONFIRMACION_REQUERIDA o
+     * IGNORADO. Se retira estadoDiario, que era un String libre con una
+     * nomenclatura distinta de las otras dos que convivian en el sistema;
+     * ahora la clasificacion la lleva tipo, sobre el enum unico
+     * TipoRegistro.
+     */
     @Data @Builder
     public static class MarcarAsistenciaResponse {
-        private Long   idTrabajador;
-        private String nombreCompleto;
-        private String accion;        // ENTRADA | SALIDA
-        private String hora;
-        private String estado;
-        private String estadoDiario;  // A_TIEMPO | TARDE | NO_PROGRAMADO
-        private String puestoNombre;
-        // Nuevos
-        private String tipo;          // PROGRAMADA | NO_PROGRAMADA
-        private String ingresoProg;   // hora programada de ingreso
-        private Integer minTardanza;  // minutos de tardanza si aplica
+        private Long    idTrabajador;
+        private String  nombreCompleto;
+        private String  accion;
+        private String  hora;
+        private String  estado;
+        private String  tipo;
+        private String  puestoNombre;
+        private String  turnoNombre;
+        private String  ingresoProg;
+        private String  salidaProg;
+        private Integer minTardanza;
+        private boolean requiereRevision;
+
+        /** true cuando el lector espera el segundo escaneo (HU-22). */
+        private boolean requiereConfirmacion;
+        private Integer segundosParaConfirmar;
+
+        /** Mensaje listo para mostrar en el dispositivo (RNF009). */
+        private String  mensaje;
     }
 
-    // ── Resumen del día / en planta ───────────────────────────
     @Data @Builder
     public static class AsistenciaResumenDTO {
-        private Long   idAsistencia;
-        private Long   idTrabajador;
-        private String nombreCompleto;
-        private String nroDocumento;
-        private String puestoNombre;
-        private String areaNombre;
-        private String fecha;
-        private String horaEntrada;   // = ingresoReal
-        private String horaSalida;    // = salidaReal
-        private String estado;
-        private String tipo;
+        private Long    idAsistencia;
+        private Long    idTrabajador;
+        private String  nombreCompleto;
+        private String  nroDocumento;
+        private String  puestoNombre;
+        private String  areaNombre;
+        private String  fecha;
+        private String  horaEntrada;
+        private String  horaSalida;
+        private String  estado;
+        private String  tipo;
+        private String  turnoNombre;
+        private boolean requiereRevision;
+        private Integer minTardanza;
+
+        /**
+         * Ausencia que cubre la jornada, si la hay.
+         *
+         * Sin este dato, el reporte no puede distinguir una falta
+         * injustificada de un dia cubierto por permiso: ambas llegan sin
+         * marcacion y con el mismo estado.
+         */
+        private String permisoAsociado;
+        private String faltaJustificadaAsociada;
+
+        /** Minutos efectivamente trabajados, para los totales del reporte. */
+        private Integer minHorasTotales;
+        private Integer minutosFeriado;
+        private boolean esDiaNoLaborable;
     }
 
-    // ── Resumen público para pantalla de marcado (kiosco) ────
-    // No expone IDs ni documentos — seguro para endpoint público
+    /** Version publica para el kiosco. No expone identificadores. */
     @Data @Builder
     public static class EnPlantaPublicDTO {
         private String nombreCompleto;
         private String puestoNombre;
         private String areaNombre;
         private String horaEntrada;
+        private String turnoNombre;
     }
 
-    // ── Detalle completo para formulario de revisión ──────────
     @Data @Builder
     public static class AsistenciaRevisionDTO {
-        private Long   idAsistencia;
-        private Long   idTrabajador;
-        private String nombreCompleto;
-        private String nroDocumento;
-        private String puestoNombre;
-        private String areaNombre;
-        private String fecha;
-        private String tipo;
-        private String estado;
-        private boolean esNocturno;
+        private Long    idAsistencia;
+        private Long    idTrabajador;
+        private String  nombreCompleto;
+        private String  nroDocumento;
+        private String  puestoNombre;
+        private String  areaNombre;
+        private String  fecha;
+        private String  tipo;
+        private String  estado;
+        private boolean requiereRevision;
+        private String  turnoNombre;
+        private boolean esDiaNoLaborable;
 
-        // Programado
         private String  ingresoProg;
         private String  salidaProg;
         private Integer minRefrigerioProg;
         private Integer minNetosProg;
         private Integer minExtraProg;
 
-        // Real
-        private String ingresoReal;
-        private String salidaReal;
+        private String  ingresoReal;
+        private String  salidaReal;
 
-        // Calculado
-        private Integer minPrevIngProg;   // llegó antes
-        private Integer minPostSalProg;   // salió después
+        private Integer minPrevIngProg;
+        private Integer minPostSalProg;
         private Integer minTardanza;
         private Integer minSalTemprana;
         private Integer minHorasTotales;
+        private Integer minutosFeriado;
 
-        // Validación
         private Integer valMinPrevIng;
         private Integer valMinPostSal;
+        private String  resultadoValidacion;
+
+        private String  permisoAsociado;
+        private String  faltaJustificadaAsociada;
+
         private String  revisadoPor;
         private String  revisadoEn;
         private String  observacion;
 
-        // UI: color del indicador de tiempo no validado
-        private String colorPrev;   // gris/amarillo-palido/amarillo/naranja
-        private String colorPost;
+        private String  colorPrev;
+        private String  colorPost;
     }
 
-    // ── Request para validar tiempos desde el frontend ────────
+    /** Validacion de hora extra excepcional (CU18). */
     @Data
     public static class ValidarTiemposRequest {
         @NotNull(message = "El ID de asistencia es obligatorio")
@@ -106,15 +141,41 @@ public class AsistenciaDTOs {
         @Max(value = 720, message = "Los minutos no pueden superar las 12 horas")
         private Integer valMinPostSal;
 
-        @Size(max = 500, message = "La observación no puede exceder 500 caracteres")
+        /** Obligatorio (RN-02). El prototipo no lo exigia realmente. */
+        @NotBlank(message = "El motivo o comentario es obligatorio")
+        @Size(max = 500, message = "La observacion no puede exceder 500 caracteres")
         private String  observacion;
 
-        @Pattern(regexp = "^$|^(FALTA|PERMISO|PROGRAMADA|NO_PROGRAMADA)$",
-                message = "Tipo de asistencia inválido")
-        private String  tipo;
+        @Pattern(regexp = "^$|^(APROBADO|RECHAZADO)$",
+                 message = "El resultado debe ser APROBADO o RECHAZADO")
+        private String  resultado;
+
+        /** Turno a asignar cuando la jornada no tiene esquema (RN-25). */
+        private Integer idTurno;
     }
 
-    // ── Request para crear asistencia no programada ───────────
+    /** Correccion de marcacion faltante o incompleta (CU15). */
+    @Data
+    public static class CorregirMarcacionRequest {
+        @NotNull(message = "El ID de asistencia es obligatorio")
+        private Long   idAsistencia;
+
+        /** Formato ISO completo: "2026-03-27T22:00:00". */
+        private String ingresoReal;
+        private String salidaReal;
+
+        @NotBlank(message = "El motivo es obligatorio")
+        @Size(min = 5, max = 500, message = "El motivo debe tener entre 5 y 500 caracteres")
+        private String motivo;
+    }
+
+    /**
+     * Registro manual por contingencia (CU19).
+     *
+     * Ingreso y salida son OPCIONALES por separado: la contingencia con
+     * dato parcial conocido es el caso mas frecuente. El prototipo los
+     * exigia ambos de forma simultanea.
+     */
     @Data
     public static class RegistrarNoProgramadaRequest {
         @NotNull(message = "El ID del trabajador es obligatorio")
@@ -122,34 +183,32 @@ public class AsistenciaDTOs {
 
         @NotBlank(message = "La fecha es obligatoria")
         @Pattern(regexp = "^\\d{4}-\\d{2}-\\d{2}$",
-                message = "La fecha debe tener formato yyyy-MM-dd")
+                 message = "La fecha debe tener formato yyyy-MM-dd")
         private String fecha;
 
-        @NotBlank(message = "La hora de ingreso es obligatoria")
-        @Pattern(regexp = "^([01]\\d|2[0-3]):[0-5]\\d$",
-                message = "La hora de ingreso debe tener formato HH:mm")
+        @Pattern(regexp = "^$|^([01]\\d|2[0-3]):[0-5]\\d$",
+                 message = "La hora de ingreso debe tener formato HH:mm")
         private String ingresoReal;
 
-        @NotBlank(message = "La hora de salida es obligatoria")
-        @Pattern(regexp = "^([01]\\d|2[0-3]):[0-5]\\d$",
-                message = "La hora de salida debe tener formato HH:mm")
+        @Pattern(regexp = "^$|^([01]\\d|2[0-3]):[0-5]\\d$",
+                 message = "La hora de salida debe tener formato HH:mm")
         private String salidaReal;
 
-        @Size(max = 500, message = "La observación no puede exceder 500 caracteres")
+        private Integer idTurno;
+
+        @NotBlank(message = "El motivo es obligatorio")
+        @Size(max = 500, message = "La observacion no puede exceder 500 caracteres")
         private String observacion;
     }
 
-    // ── Resumen de quincena (para lista de selección) ─────────
     @Data @Builder
     public static class QuincenaResumenDTO {
         private Long   idQuincena;
-        private String descripcion;  // "1ra quincena de marzo 2026"
-        private String fechaInicio;
-        private String fechaFin;
-        private String inicioReal;   // con lógica de hora de corte
-        private String finReal;
+        private String descripcion;
+        private String inicio;
+        private String fin;
         private String estado;
-        private long   totalAsistencias;
-        private long   pendientesRevision;
+        /** Registros que impiden cerrar la quincena (RN-37). */
+        private long   bloqueantes;
     }
 }

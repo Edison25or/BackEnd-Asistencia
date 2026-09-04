@@ -1,670 +1,545 @@
 package com.idat.asistencia.service.impl;
 
 import com.idat.asistencia.dto.ConsolidadoDTOs.*;
-import com.idat.asistencia.dto.ConsolidadoDTOs.BolsaHistorialDTO;
-import com.idat.asistencia.dto.ConsolidadoDTOs.ConsolidadoReporteResponse;
 import com.idat.asistencia.exception.BusinessException;
 import com.idat.asistencia.exception.ResourceNotFoundException;
 import com.idat.asistencia.model.entity.*;
-import com.idat.asistencia.model.entity.Usuario;
-import com.idat.asistencia.model.enums.EstadoAsistencia;
-import com.idat.asistencia.model.enums.EstadoQuincena;
-import com.idat.asistencia.model.enums.TipoAsistencia;
+import com.idat.asistencia.model.enums.*;
 import com.idat.asistencia.repository.*;
 import com.idat.asistencia.security.SecurityHelper;
 import com.idat.asistencia.service.AuditoriaService;
 import com.idat.asistencia.service.ConsolidadoService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.math.BigInteger;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
 
+/**
+ * Generacion y cierre del consolidado quincenal (CU21, CU23).
+ *
+ * ============================================================
+ * QUE SE ELIMINA DEL PROTOTIPO
+ * ============================================================
+ * Todo el subsistema de bolsa de horas (entrada, acumulada, consumida,
+ * salida), los tramos de recargo Tasa A del 25 por ciento y Tasa B del 35
+ * por ciento con su constante TOPE_TASA_A_MIN, el bono en soles y los
+ * minutos a descontar.
+ *
+ * Contradicen el alcance: el sistema no calcula montos de pago (AL-01) ni
+ * tramos de recargo porcentual (AL-04). Contabilidad hace ese calculo
+ * fuera del sistema con el consolidado exportado (DEP-05).
+ *
+ * ============================================================
+ * QUE SE CORRIGE
+ * ============================================================
+ * 1. Los totales pasan de columnas fijas a filas de ConsolidadoTurno, una
+ *    por combinacion de turno y condicion de feriado. Con columnas,
+ *    agregar el desglose de feriado habria llevado el consolidado de seis
+ *    a diez columnas, y un tercer turno habria exigido migrar la tabla.
+ *
+ * 2. Las asistencias incluidas pasan a estado CONSOLIDADO. En el
+ *    prototipo se quedaban en REVISADO indefinidamente, de modo que
+ *    nunca quedaba registro de que ya habian sido liquidadas.
+ *
+ * 3. El criterio de bloqueo deja de ser "cualquier estado distinto de
+ *    REVISADO o CONSOLIDADO". Como ninguna jornada normal llegaba a
+ *    REVISADO por si sola, el cierre quedaba bloqueado de forma
+ *    permanente.
+ *
+ * 4. La reapertura es directa, en un solo paso (RN-38). Desaparecen
+ *    solicitarReapertura() y aprobarReapertura(), que implementaban un
+ *    flujo de dos pasos no contemplado y que ni siquiera registraba quien
+ *    solicitaba.
+ */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class ConsolidadoServiceImpl implements ConsolidadoService {
 
-    private final ConsolidadoRepository  consolidadoRepo;
-    private final QuincenaRepository     quincenaRepo;
-    private final AsistenciaRepository   asistenciaRepo;
-    private final TrabajadorRepository   trabajadorRepo;
-    private final UsuarioRepository      usuarioRepo;
-    private final AuditoriaService       auditoriaService;
-    private final SecurityHelper         securityHelper;
+    private final ConsolidadoRepository       consolidadoRepo;
+    private final ConsolidadoTurnoRepository  consolidadoTurnoRepo;
+    private final AsistenciaRepository        asistenciaRepo;
+    private final QuincenaRepository          quincenaRepo;
+    private final SecurityHelper              securityHelper;
+    private final AuditoriaService            auditoria;
 
-    // Tope diario en minutos para tasa A (2 horas = 120 min por normativa peruana)
-    private static final int TOPE_TASA_A_MIN = 120;
+    private static final String TABLA = "consolidado_quincena";
 
     // ════════════════════════════════════════════════════════════
-    // GENERAR CONSOLIDADO
+    // GENERAR (CU21)
     // ════════════════════════════════════════════════════════════
+
     @Override
     @Transactional
     public List<ConsolidadoResponse> generarConsolidado(Long idQuincena) {
         Quincena q = buscarQuincena(idQuincena);
 
-        if (q.getEstado() == EstadoQuincena.CERRADA)
+        // ---- 1. Bloqueo por pendientes (RN-37) ----
+        long bloqueantes = asistenciaRepo.countBloqueantes(idQuincena);
+        if (bloqueantes > 0) {
+            List<Asistencia> detalle = asistenciaRepo.findBloqueantes(idQuincena);
+            String resumen = detalle.stream().limit(5)
+                    .map(a -> a.getTrabajador().getNombreCompleto()
+                            + " (" + a.getFecha() + ", " + a.getTipo() + ")")
+                    .collect(Collectors.joining("; "));
             throw new BusinessException(
-                    "La quincena «" + q.getDescripcion() + "» ya está cerrada.");
+                    "No se puede generar el consolidado: hay " + bloqueantes
+                            + " registro(s) pendientes de revision. Ejemplos: " + resumen
+                            + (bloqueantes > 5 ? " y " + (bloqueantes - 5) + " mas." : "."));
+        }
 
-        // Obtener todas las asistencias REVISADAS de la quincena
-        List<Asistencia> asistencias = asistenciaRepo.findByQuincena(idQuincena)
-                .stream()
-                .filter(a -> a.getEstado() == EstadoAsistencia.REVISADO
-                        || a.getEstado() == EstadoAsistencia.CONSOLIDADO)
-                .collect(Collectors.toList());
-
+        List<Asistencia> asistencias = asistenciaRepo.findByQuincena(idQuincena);
         if (asistencias.isEmpty())
-            throw new BusinessException(
-                    "No hay asistencias revisadas en esta quincena. " +
-                            "Revisa las asistencias antes de generar el consolidado.");
+            throw new BusinessException("La quincena no tiene registros de asistencia.");
 
-        // Agrupar por trabajador
+        Usuario actor = securityHelper.getUsuarioAutenticado();
+        LocalDateTime ahora = LocalDateTime.now();
+
+        // ---- 2. Agrupar por trabajador ----
         Map<Long, List<Asistencia>> porTrabajador = asistencias.stream()
                 .collect(Collectors.groupingBy(a -> a.getTrabajador().getIdTrabajador()));
 
-        List<ConsolidadoResponse> resultado = new ArrayList<>();
+        List<ConsolidadoQuincena> resultado = new ArrayList<>();
 
-        for (Map.Entry<Long, List<Asistencia>> entry : porTrabajador.entrySet()) {
-            Long           idTrab  = entry.getKey();
-            List<Asistencia> asis  = entry.getValue();
+        for (var entrada : porTrabajador.entrySet()) {
+            List<Asistencia> jornadas = entrada.getValue();
+            Trabajador t = jornadas.get(0).getTrabajador();
 
-            ConsolidadoQuincena consolidado = consolidadoRepo
-                    .findByQuincena_IdQuincenaAndTrabajador_IdTrabajador(idQuincena, idTrab)
-                    .orElse(null);
-
-            // Calcular saldo de bolsa anterior
-            int bolsaEntrada = 0;
-            if (consolidado == null) {
-                // Primera vez: buscar la bolsa_salida del último consolidado cerrado
-                List<ConsolidadoQuincena> anteriores =
-                        consolidadoRepo.findUltimosCerradosByTrabajador(idTrab, idQuincena);
-                if (!anteriores.isEmpty())
-                    bolsaEntrada = anteriores.get(0).getBolsaSalida();
-            } else {
-                bolsaEntrada = consolidado.getBolsaEntrada();
+            // Version anterior, si se esta regenerando tras una
+            // reapertura. Se conserva marcada como REEMPLAZADO para que
+            // ambas queden trazables (RN-38).
+            int version = 1;
+            Optional<ConsolidadoQuincena> previo = consolidadoRepo
+                    .findVigentePorQuincenaYTrabajador(idQuincena, t.getIdTrabajador());
+            if (previo.isPresent()) {
+                ConsolidadoQuincena viejo = previo.get();
+                viejo.setEstado(EstadoConsolidado.REEMPLAZADO);
+                consolidadoRepo.save(viejo);
+                version = viejo.getVersion() + 1;
             }
 
-            ConsolidadoQuincena calc = calcularParaTrabajador(
-                    q, asis, idTrab, bolsaEntrada, consolidado);
+            // El consolidado nace CERRADO, no BORRADOR.
+            //
+            // Generarlo y cerrar la quincena son la misma operacion
+            // (RN-36): no existe un paso intermedio en el que el
+            // consolidado exista pero admita cambios. Dejarlo en BORRADOR
+            // describia un estado que el sistema nunca alcanza, y ademas
+            // contradecia a la quincena, que si quedaba CERRADA.
+            //
+            // La consecuencia practica era que editarConsolidado() no
+            // rechazaba la modificacion, porque su guarda comprueba
+            // justamente que el estado sea CERRADO.
+            ConsolidadoQuincena c = ConsolidadoQuincena.builder()
+                    .quincena(q)
+                    .trabajador(t)
+                    .version(version)
+                    .estado(EstadoConsolidado.CERRADO)
+                    .generadoEn(ahora)
+                    .generadoPor(actor)
+                    .cerradoEn(ahora)
+                    .build();
 
-            resultado.add(toResponse(consolidadoRepo.save(calc)));
+            acumular(c, jornadas);
+            resultado.add(consolidadoRepo.save(c));
         }
 
-        auditoriaService.registrar("consolidado_quincena", idQuincena, "GENERAR");
-        return resultado;
+        // ---- 3. Marcar las asistencias como consolidadas ----
+        for (Asistencia a : asistencias) {
+            a.setEstado(EstadoAsistencia.CONSOLIDADO);
+            asistenciaRepo.save(a);
+        }
+
+        // ---- 4. Cerrar la quincena (RN-36) ----
+        q.setEstado(EstadoQuincena.CERRADA);
+        q.setCerradoPor(actor);
+        q.setCerradoEn(ahora);
+        quincenaRepo.save(q);
+
+        auditoria.registrarCampo(TABLA, idQuincena, "GENERAR_CONSOLIDADO",
+                "estado_quincena", "ABIERTA",
+                "CERRADA - " + resultado.size() + " consolidados generados");
+
+        return resultado.stream().map(this::toResponse).collect(Collectors.toList());
     }
 
-    // ════════════════════════════════════════════════════════════
-    // CÁLCULO POR TRABAJADOR
-    // ════════════════════════════════════════════════════════════
-    private ConsolidadoQuincena calcularParaTrabajador(
-            Quincena quincena,
-            List<Asistencia> asis,
-            Long idTrabajador,
-            int bolsaEntrada,
-            ConsolidadoQuincena existente) {
+    /**
+     * Acumula las jornadas de un trabajador en filas por turno y
+     * condicion de feriado.
+     *
+     * ============================================================
+     * LOS BUCKETS SON EXCLUYENTES
+     * ============================================================
+     * Los minutos trabajados dentro de un dia feriado se RESTAN del total
+     * normal del turno y se SUMAN a la fila de feriado del mismo turno.
+     * Contarlos en ambos lados duplicaria las horas del consolidado.
+     *
+     * Una jornada nocturna que empieza la vispera de un feriado aporta
+     * minutos a las dos filas: los previos a la medianoche a la normal y
+     * los posteriores a la de feriado (RN-41).
+     */
+    private void acumular(ConsolidadoQuincena c, List<Asistencia> jornadas) {
+        int diasFalta = 0, diasPermiso = 0, diasFaltaJust = 0;
+        int totalTardanza = 0, totalSalTemprana = 0;
+        int minTrabajados = 0, minEsperados = 0;
 
-        Trabajador trabajador = trabajadorRepo.findById(idTrabajador)
-                .orElseThrow(() -> new ResourceNotFoundException("Trabajador no encontrado."));
+        for (Asistencia a : jornadas) {
 
-        int minNormalesDia   = 0, minNormalesNoche = 0;
-        int minExtraDiaA     = 0, minExtraNocheA   = 0;
-        int minExtraDiaB     = 0, minExtraNocheB   = 0;
-        int minDiaDesc       = 0, minNocheDesc     = 0;
-        int minTardanza      = 0, minSalTemprana   = 0;
-        int diasFalta        = 0, diasPermiso      = 0;
+            // ---- Conteos por dia ----
+            //
+            // La ausencia solo cuenta como tal si el trabajador NO vino.
+            // Un permiso no impide marcar: si el trabajador se presenta
+            // igual, la jornada real manda sobre la ausencia declarada.
+            //
+            // Sin la comprobacion de ingresoReal, alguien con permiso que
+            // decide venir a trabajar veia sus horas descartadas: el
+            // consolidado contaba el dia como permiso y saltaba antes de
+            // sumar nada. Trabajaba y no se le pagaba.
+            boolean vinoATrabajar = a.getIngresoReal() != null;
 
-        for (Asistencia a : asis) {
-            boolean nocturno = a.isEsNocturno();
+            if (a.getTipo() == TipoRegistro.FALTA_INJUSTIFICADA) { diasFalta++; continue; }
 
-            switch (a.getTipo()) {
-                case FALTA -> {
-                    // Las faltas descontables se calculan desde los minutos programados
-                    int minProg = a.getMinNetosProg() != null ? a.getMinNetosProg() : 0;
-                    if (nocturno) minNocheDesc += minProg;
-                    else          minDiaDesc   += minProg;
-                    diasFalta++;
-                }
-                case PERMISO -> diasPermiso++;
+            if (!vinoATrabajar) {
+                if (a.getPermiso()          != null) { diasPermiso++;   continue; }
+                if (a.getFaltaJustificada() != null) { diasFaltaJust++; continue; }
+            } else if (a.getPermiso() != null || a.getFaltaJustificada() != null) {
+                // Trabajo pese a tener ausencia registrada. Las horas
+                // cuentan, y se deja constancia para que Contabilidad no
+                // lo lea como un error de captura.
+                c.setObservaciones(concatenar(c.getObservaciones(),
+                        "Jornada " + a.getFecha() + " trabajada pese a tener "
+                                + (a.getPermiso() != null ? "permiso" : "falta justificada")
+                                + " registrado."));
+            }
 
-                default -> {
-                    // Horas trabajadas normales
-                    int minTrab = a.getMinHorasTotales() != null ? a.getMinHorasTotales() : 0;
-                    int minProg = a.getMinNetosProg()    != null ? a.getMinNetosProg()    : 0;
+            totalTardanza    += nz(a.getMinTardanza());
+            totalSalTemprana += nz(a.getMinSalTemprana());
+            minEsperados     += nz(a.getMinNetosProg()) + nz(a.getMinExtraProg());
 
-                    // Las horas normales son hasta el máximo programado
-                    int normales = Math.min(minTrab, minProg);
-                    if (normales > 0) {
-                        if (nocturno) minNormalesNoche += normales;
-                        else          minNormalesDia   += normales;
-                    }
+            int totales = nz(a.getMinHorasTotales());
+            if (totales == 0) continue;
 
-                    // Horas extra = tiempos validados (previo + posterior)
-                    int extra = (a.getValMinPrevIng()  != null ? a.getValMinPrevIng()  : 0)
-                            + (a.getValMinPostSal()  != null ? a.getValMinPostSal()  : 0);
+            minTrabajados += totales;
 
-                    if (extra > 0) {
-                        // Tasa A: hasta TOPE_TASA_A_MIN por día
-                        int paraTasaA = Math.min(extra, TOPE_TASA_A_MIN);
-                        int paraTasaB = Math.max(0, extra - TOPE_TASA_A_MIN);
+            Turno turno = a.getTurno();
+            if (turno == null) {
+                // Sin turno asignado no se puede clasificar. El Jefe debe
+                // asignarlo al resolver la jornada (RN-25). Se registra
+                // para no perder los minutos en silencio.
+                log.warn("Asistencia {} sin turno asignado: {} minutos sin clasificar",
+                        a.getIdAsistencia(), totales);
+                c.setObservaciones(concatenar(c.getObservaciones(),
+                        "Jornada " + a.getFecha() + " sin turno asignado ("
+                                + totales + " min sin clasificar)."));
+                continue;
+            }
 
-                        if (nocturno) {
-                            minExtraNocheA += paraTasaA;
-                            minExtraNocheB += paraTasaB;
-                        } else {
-                            minExtraDiaA += paraTasaA;
-                            minExtraDiaB += paraTasaB;
-                        }
-                    }
+            // Hora extra reconocida: estructural mas excepcional aprobada.
+            // El consolidado las reporta en un total unico; la distincion
+            // se conserva en el registro diario y el reporte detallado.
+            int extra = nz(a.getMinExtraProg());
+            if (a.getResultadoValidacion() == ResultadoValidacion.APROBADO) {
+                extra += nz(a.getValMinPrevIng()) + nz(a.getValMinPostSal());
+            }
+            extra = Math.min(extra, totales);
+            int normales = totales - extra;
 
-                    // Informativos
-                    if (a.getMinTardanza()     != null) minTardanza   += a.getMinTardanza();
-                    if (a.getMinSalTemprana()  != null) minSalTemprana+= a.getMinSalTemprana();
-                }
+            // Reparto entre feriado y no feriado, en proporcion a los
+            // minutos que cayeron dentro del dia feriado.
+            int minFeriado = Math.min(nz(a.getMinutosFeriado()), totales);
+
+            if (minFeriado <= 0) {
+                c.acumular(turno, false, normales, extra);
+            } else if (minFeriado >= totales) {
+                c.acumular(turno, true, normales, extra);
+            } else {
+                double proporcion  = (double) minFeriado / totales;
+                int normalesFer    = (int) Math.round(normales * proporcion);
+                int extraFer       = (int) Math.round(extra    * proporcion);
+                c.acumular(turno, true,  normalesFer,            extraFer);
+                c.acumular(turno, false, normales - normalesFer, extra - extraFer);
             }
         }
 
-        // Tasas vigentes (por defecto normativa peruana)
-        BigDecimal tasaA = BigDecimal.valueOf(25.00);
-        BigDecimal tasaB = BigDecimal.valueOf(35.00);
-
-        // Si ya existía, preservar los campos manuales y tasas
-        ConsolidadoQuincena.ConsolidadoQuincenaBuilder builder = ConsolidadoQuincena.builder()
-                .quincena(quincena)
-                .trabajador(trabajador)
-                .minNormalesDia(minNormalesDia)
-                .minNormalesNoche(minNormalesNoche)
-                .tasaA(tasaA)
-                .minExtraDiaA(minExtraDiaA)
-                .minExtranocheA(minExtraNocheA)
-                .tasaB(tasaB)
-                .minExtraDiaB(minExtraDiaB)
-                .minExtraNocheB(minExtraNocheB)
-                .minDiaDescontar(minDiaDesc)
-                .minNocheDescontar(minNocheDesc)
-                .minTotalTardanza(minTardanza)
-                .minTotalSalTemprana(minSalTemprana)
-                .diasFalta(diasFalta)
-                .diasPermiso(diasPermiso)
-                .bolsaEntrada(bolsaEntrada)
-                .estado("BORRADOR");
-
-        if (existente != null) {
-            // Preservar campos manuales y de bolsa decididos previamente
-            builder.id(existente.getId())
-                    .otroBono(existente.getOtroBono())
-                    .detalleOtroBono(existente.getDetalleOtroBono())
-                    .observaciones(existente.getObservaciones())
-                    .bolsaAcumulada(existente.getBolsaAcumulada())
-                    .bolsaConsumida(existente.getBolsaConsumida())
-                    .generadoPor(existente.getGeneradoPor())
-                    .generadoEn(existente.getGeneradoEn());
-        }
-
-        ConsolidadoQuincena result = builder.build();
-        result.recalcularBolsaSalida();
-        return result;
+        c.setDiasFalta(diasFalta);
+        c.setDiasPermiso(diasPermiso);
+        c.setDiasFaltaJustificada(diasFaltaJust);
+        c.setMinTotalTardanza(totalTardanza);
+        c.setMinTotalSalTemprana(totalSalTemprana);
+        c.setMinAcumuladoVsEsperado(minTrabajados - minEsperados);
     }
 
     // ════════════════════════════════════════════════════════════
     // CONSULTAS
     // ════════════════════════════════════════════════════════════
+
     @Override
     public List<ConsolidadoResponse> getConsolidado(Long idQuincena) {
-        return consolidadoRepo
-                .findByQuincena_IdQuincenaOrderByTrabajador_APaterno(idQuincena)
+        return consolidadoRepo.findVigentesPorQuincena(idQuincena)
                 .stream().map(this::toResponse).collect(Collectors.toList());
     }
 
     @Override
     public ConsolidadoResponse getConsolidadoTrabajador(Long idQuincena, Long idTrabajador) {
-        // Si es TRABAJADOR, forzar que solo vea su propio consolidado
-        idTrabajador = resolverIdTrabajador(idTrabajador);
-
-        return toResponse(consolidadoRepo
-                .findByQuincena_IdQuincenaAndTrabajador_IdTrabajador(idQuincena, idTrabajador)
+        securityHelper.verificarAccesoPropioOAdmin(idTrabajador);
+        return consolidadoRepo.findVigentePorQuincenaYTrabajador(idQuincena, idTrabajador)
+                .map(this::toResponse)
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "No hay consolidado para ese trabajador en esta quincena.")));
+                        "No existe consolidado para ese trabajador en la quincena."));
     }
 
-    // ════════════════════════════════════════════════════════════
-    // EDICIÓN MANUAL
-    // ════════════════════════════════════════════════════════════
+    /**
+     * Calcula el consolidado SIN persistirlo ni cerrar la quincena.
+     *
+     * Generar el consolidado cierra la quincena de forma irreversible
+     * salvo reapertura (RN-36), asi que quien lo ejecuta necesita poder
+     * ver el resultado antes de comprometerse. Sin esta operacion, la
+     * unica manera de saber que produce el calculo es ejecutarlo.
+     *
+     * Reutiliza el mismo acumular() que generar(), de modo que la vista
+     * previa y el consolidado definitivo no pueden divergir.
+     *
+     * A diferencia de generar(), NO rechaza por pendientes de revision:
+     * su proposito es justamente mostrar como va quedando el periodo
+     * mientras se resuelven.
+     */
+    @Override
+    public List<ConsolidadoResponse> previsualizar(Long idQuincena) {
+        // El control de rol lo aplica el @PreAuthorize del controlador,
+        // igual que en generar(). SecurityHelper no expone una
+        // comprobacion de rol administrativo, y anadirla aqui duplicaria
+        // en el servicio una regla que ya vive en la capa de entrada.
+        Quincena q = buscarQuincena(idQuincena);
+
+        List<Asistencia> asistencias = asistenciaRepo.findByQuincena(idQuincena);
+        if (asistencias.isEmpty())
+            throw new BusinessException("La quincena no tiene registros de asistencia.");
+
+        Map<Long, List<Asistencia>> porTrabajador = asistencias.stream()
+                .collect(Collectors.groupingBy(a -> a.getTrabajador().getIdTrabajador()));
+
+        List<ConsolidadoResponse> salida = new ArrayList<>();
+
+        for (var entrada : porTrabajador.entrySet()) {
+            List<Asistencia> jornadas = entrada.getValue();
+
+            ConsolidadoQuincena c = ConsolidadoQuincena.builder()
+                    .quincena(q)
+                    .trabajador(jornadas.get(0).getTrabajador())
+                    .version(0)                       // 0 = no persistido
+                    .estado(EstadoConsolidado.BORRADOR)
+                    .build();
+
+            acumular(c, jornadas);
+            salida.add(toResponse(c));
+        }
+
+        salida.sort(Comparator.comparing(ConsolidadoResponse::getTrabajadorNombre));
+        return salida;
+    }
+
     @Override
     @Transactional
     public ConsolidadoResponse editar(Long idConsolidado, EditarConsolidadoRequest req) {
         ConsolidadoQuincena c = consolidadoRepo.findById(idConsolidado)
                 .orElseThrow(() -> new ResourceNotFoundException("Consolidado no encontrado."));
 
-        if ("CERRADO".equals(c.getEstado()))
-            throw new BusinessException("No se puede editar un consolidado cerrado.");
-
-        if (req.getOtroBono()        != null) c.setOtroBono(req.getOtroBono());
-        if (req.getDetalleOtroBono() != null) c.setDetalleOtroBono(req.getDetalleOtroBono());
-        if (req.getObservaciones()   != null) c.setObservaciones(req.getObservaciones());
-
-        return toResponse(consolidadoRepo.save(c));
-    }
-
-    // ════════════════════════════════════════════════════════════
-    // CIERRE DE QUINCENA
-    // ════════════════════════════════════════════════════════════
-    @Override
-    @Transactional
-    public CierreQuincenaResponse cerrarQuincena(CerrarQuincenaRequest req, String username) {
-        Quincena q = buscarQuincena(req.getIdQuincena());
-
-        if (q.getEstado() == EstadoQuincena.CERRADA)
-            throw new BusinessException("La quincena ya está cerrada.");
-
-        List<ConsolidadoQuincena> consolidados =
-                consolidadoRepo.findByQuincena_IdQuincenaOrderByTrabajador_APaterno(req.getIdQuincena());
-
-        if (consolidados.isEmpty())
+        // Un consolidado CERRADO SI admite editar su observacion.
+        //
+        // RN-36 vuelve definitiva la informacion para el pago, es decir
+        // las HORAS. La observacion es una nota para Contabilidad, no un
+        // valor calculado, y ningun metodo del servicio permite alterar
+        // los minutos de un consolidado ya generado: para eso hay que
+        // reabrir la quincena y regenerarlo.
+        //
+        // Condicionarla al estado del consolidado o de la quincena dejaba
+        // el metodo inservible: como generar y cerrar son la misma
+        // operacion, no existe momento alguno en que la nota pudiera
+        // escribirse.
+        //
+        // Lo que si se rechaza es editar una version reemplazada, porque
+        // ya no es el documento vigente del periodo.
+        if (c.getEstado() == EstadoConsolidado.REEMPLAZADO)
             throw new BusinessException(
-                    "No hay consolidados generados. Genera el consolidado antes de cerrar.");
+                    "Este consolidado fue reemplazado por una version posterior. "
+                            + "Edita la vigente.");
 
-        // Mapa de decisiones por trabajador
-        Map<Long, DecisionExtraDTO> decisiones = new HashMap<>();
-        if (req.getDecisiones() != null) {
-            for (DecisionExtraDTO d : req.getDecisiones())
-                decisiones.put(d.getIdTrabajador(), d);
-        }
+        String anterior = c.getObservaciones();
+        c.setObservaciones(req.getObservaciones());
+        ConsolidadoQuincena guardado = consolidadoRepo.save(c);
 
-        Long cerradoPor = usuarioRepo.findByUsername(username)
-                .map(u -> u.getIdUsuario() != null ? u.getIdUsuario().longValue() : null)
-                .orElse(null);
+        auditoria.registrarCampo(TABLA, idConsolidado, "MODIFICAR",
+                "observaciones", anterior, req.getObservaciones());
 
-        int cerrados = 0;
-
-
-
-        // Tope de bolsa: ±480 minutos (8 horas)
-        final int TOPE_BOLSA = 480;
-
-        for (ConsolidadoQuincena c : consolidados) {
-            if ("CERRADO".equals(c.getEstado())) { cerrados++; continue; }
-
-            DecisionExtraDTO dec = decisiones.get(c.getTrabajador().getIdTrabajador());
-
-            int E  = c.getTotalExtraMinutos();                              // extras de esta quincena
-            int BE = c.getBolsaEntrada() != null ? c.getBolsaEntrada() : 0; // bolsa entrada
-
-            int P, C, aBolsa;
-
-            if (dec != null) {
-                P = dec.getMinExtraPagados() != null ? dec.getMinExtraPagados() : 0;
-                C = dec.getBolsaConsumida()  != null ? dec.getBolsaConsumida()  : 0;
-
-                // ── Validaciones de Pagar ─────────────────────────
-                if (P < 0 || C < 0) {
-                    throw new BusinessException("Los valores no pueden ser negativos.");
-                }
-
-                // Máximo a pagar:
-                //   - Si bolsa entrada es NEGATIVA: solo puede pagar sus extras (E)
-                //   - Si bolsa entrada es POSITIVA: puede pagar E + BE
-                int maxPagar = Math.max(0, E + BE);
-
-                // Mínimo a pagar (para no exceder +480 en bolsa salida):
-                //   Solo aplica si E + BE > 480
-                int minPagar = Math.max(0, (E + Math.max(0, BE)) - TOPE_BOLSA);
-
-                if (P > maxPagar) {
-                    throw new BusinessException(
-                            "Trabajador " + c.getTrabajador().getPNombre() + " " + c.getTrabajador().getAPaterno()
-                                    + ": no se puede pagar " + P + " min. Máximo: " + maxPagar + ".");
-                }
-                if (P < minPagar) {
-                    throw new BusinessException(
-                            "Trabajador " + c.getTrabajador().getPNombre() + " " + c.getTrabajador().getAPaterno()
-                                    + ": debe pagar al menos " + minPagar
-                                    + " min para que la bolsa no exceda 480 a favor.");
-                }
-
-                // ── Calcular A Bolsa automáticamente ───────────────
-                // Si paga menos o igual a E → el resto va a bolsa
-                // Si paga más que E → consume de bolsa para cubrir la diferencia
-                if (P <= E) {
-                    aBolsa = E - P;
-                } else {
-                    aBolsa = 0;
-                    int consumoObligado = P - E;
-                    if (C < consumoObligado) C = consumoObligado;
-                }
-
-                // ── Validación de Consumir ─────────────────────────
-                // Máximo consumir: BE + aBolsa + 480 (no más negativo que -480)
-                int maxConsumir = BE + aBolsa + TOPE_BOLSA;
-                if (C > maxConsumir) {
-                    throw new BusinessException(
-                            "Trabajador " + c.getTrabajador().getPNombre() + " " + c.getTrabajador().getAPaterno()
-                                    + ": no se puede consumir " + C + " min. Máximo: " + maxConsumir
-                                    + " (la bolsa no puede pasar de 480 min en contra).");
-                }
-
-            } else {
-                // Default: pagar todos los extras, no tocar bolsa
-                P = E;
-                aBolsa = 0;
-                C = 0;
-            }
-
-            c.setMinExtraPagados(P);
-            c.setMinExtraABolsa (aBolsa);
-            c.setBolsaAcumulada (aBolsa);   // ← sin esto la bolsa no crece
-            c.setBolsaConsumida (C);
-
-            c.recalcularBolsaSalida();
-            c.setEstado("CERRADO");
-            c.setCerradoEn(LocalDateTime.now());
-            c.setCerradoPor(cerradoPor);
-            consolidadoRepo.save(c);
-            cerrados++;
-        }
-
-        // Cerrar la quincena
-        q.setEstado(EstadoQuincena.CERRADA);
-        q.setCerradoPor(cerradoPor);
-        q.setCerradoEn(LocalDateTime.now());
-        quincenaRepo.save(q);
-
-        auditoriaService.registrar("quincenas", req.getIdQuincena(), "CERRAR");
-
-        return CierreQuincenaResponse.builder()
-                .idQuincena(q.getIdQuincena())
-                .descripcion(q.getDescripcion())
-                .totalTrabajadores(consolidados.size())
-                .consolidadosCerrados(cerrados)
-                .cerradoEn(LocalDateTime.now().toString())
-                .build();
+        return toResponse(guardado);
     }
 
-    // ════════════════════════════════════════════════════════════
-    // REAPERTURA
-    // ════════════════════════════════════════════════════════════
-    @Override
-    @Transactional
-    public void solicitarReapertura(ReaperturaRequest req) {
-        Quincena q = buscarQuincena(req.getIdQuincena());
-
-        if (q.getEstado() != EstadoQuincena.CERRADA)
-            throw new BusinessException("Solo se puede solicitar reapertura de quincenas cerradas.");
-
-        q.setEstado(EstadoQuincena.REAPERTURA_PENDIENTE);
-        q.setMotivoReapertura(req.getMotivo());
-        quincenaRepo.save(q);
-
-        auditoriaService.registrarCampo("quincenas", req.getIdQuincena(),
-                "SOLICITAR_REAPER", "estado", "CERRADA", "REAPERTURA_PENDIENTE");
-    }
-
-    @Override
-    @Transactional
-    public void aprobarReapertura(Long idQuincena, String username) {
-        Quincena q = buscarQuincena(idQuincena);
-
-        if (q.getEstado() != EstadoQuincena.REAPERTURA_PENDIENTE)
-            throw new BusinessException("La quincena no está en estado REAPERTURA_PENDIENTE.");
-
-        Long reabiertoPor = usuarioRepo.findByUsername(username)
-                .map(u -> u.getIdUsuario() != null ? u.getIdUsuario().longValue() : null)
-                .orElse(null);
-
-        q.setEstado(EstadoQuincena.ABIERTA);
-        q.setReabiertoPor(reabiertoPor);
-        q.setReabiertaEn(LocalDateTime.now());
-        quincenaRepo.save(q);
-
-        // Revertir consolidados a BORRADOR
-        consolidadoRepo.findByQuincena_IdQuincenaOrderByTrabajador_APaterno(idQuincena)
-                .forEach(c -> {
-                    if ("CERRADO".equals(c.getEstado())) {
-                        c.setEstado("BORRADOR");
-                        c.setCerradoEn(null);
-                        c.setCerradoPor(null);
-                        consolidadoRepo.save(c);
-                    }
-                });
-
-        auditoriaService.registrarCampo("quincenas", idQuincena,
-                "APROBAR_REAPER", "estado", "REAPERTURA_PENDIENTE", "ABIERTA");
-    }
-
-    // ════════════════════════════════════════════════════════════
-    // RESUMEN DE QUINCENAS
-    // ════════════════════════════════════════════════════════════
     @Override
     public List<QuincenaConsolidadoResumenDTO> getQuincenasConResumen() {
-        // V5 FIX: Si es TRABAJADOR, solo mostrar quincenas donde tiene consolidado
-        // y ocultar datos internos (pendientes, flags de generación/cierre)
-        boolean esTrabajador = securityHelper.esTrabajador();
-        Long idTrabajadorPropio = esTrabajador ? securityHelper.getIdTrabajadorAutenticado() : null;
-
-        return quincenaRepo.findAll().stream()
-                .sorted(Comparator
-                        .comparingInt(Quincena::getAnio).reversed()
-                        .thenComparingInt(Quincena::getMes).reversed()
-                        .thenComparingInt(Quincena::getNumero).reversed())
-                .map(q -> {
-                    if (esTrabajador) {
-                        // Para TRABAJADOR: verificar si tiene consolidado en esta quincena
-                        boolean tieneConsolidado = consolidadoRepo
-                                .findByQuincena_IdQuincenaAndTrabajador_IdTrabajador(
-                                        q.getIdQuincena(), idTrabajadorPropio)
-                                .isPresent();
-
-                        if (!tieneConsolidado) return null; // Filtrar quincenas sin consolidado
-
-                        return QuincenaConsolidadoResumenDTO.builder()
-                                .idQuincena(q.getIdQuincena())
-                                .descripcion(q.getDescripcion())
-                                .fechaInicio(q.getFechaInicio().toString())
-                                .fechaFin(q.getFechaFin().toString())
-                                .estado(q.getEstado().name())
-                                // Ocultar datos internos para TRABAJADOR
-                                .totalConsolidados(0)
-                                .pendientesRevision(0)
-                                .puedeGenerarse(false)
-                                .puedeCerrarse(false)
-                                .build();
-                    }
-
-                    // Para roles administrativos: comportamiento original completo
-                    long totalC = consolidadoRepo.countByQuincena_IdQuincena(q.getIdQuincena());
-                    long pend   = asistenciaRepo.countByQuincena_IdQuincenaAndEstadoIn(
-                            q.getIdQuincena(),
-                            List.of(EstadoAsistencia.CALCULADO, EstadoAsistencia.MARCADO,
-                                    EstadoAsistencia.PENDIENTE));
-                    return QuincenaConsolidadoResumenDTO.builder()
-                            .idQuincena(q.getIdQuincena())
-                            .descripcion(q.getDescripcion())
-                            .fechaInicio(q.getFechaInicio().toString())
-                            .fechaFin(q.getFechaFin().toString())
-                            .estado(q.getEstado().name())
-                            .totalConsolidados(totalC)
-                            .pendientesRevision(pend)
-                            .puedeGenerarse(pend == 0 && q.getEstado() != EstadoQuincena.CERRADA)
-                            .puedeCerrarse(totalC > 0 && q.getEstado() == EstadoQuincena.ABIERTA)
-                            .build();
-                })
-                .filter(Objects::nonNull)
-                .collect(Collectors.toList());
+        return quincenaRepo.findAllByOrderByInicioDesc().stream().map(q -> {
+            long bloqueantes = asistenciaRepo.countBloqueantes(q.getIdQuincena());
+            return QuincenaConsolidadoResumenDTO.builder()
+                    .idQuincena(q.getIdQuincena())
+                    .descripcion(q.getDescripcion())
+                    .inicio(q.getInicio().toString())
+                    .fin(q.getFin().toString())
+                    .estado(q.getEstado().name())
+                    .totalConsolidados(consolidadoRepo.countByQuincena_IdQuincena(q.getIdQuincena()))
+                    .bloqueantes(bloqueantes)
+                    .puedeGenerarse(q.isAbierta() && bloqueantes == 0)
+                    .build();
+        }).collect(Collectors.toList());
     }
 
-    // ════════════════════════════════════════════════════════════
-    // HISTORIAL BOLSA
-    // ════════════════════════════════════════════════════════════
-    @Override
-    public List<BolsaHistorialDTO> getHistorialBolsa(Long idTrabajador) {
-        // Si es TRABAJADOR, forzar que solo vea su propio historial
-        idTrabajador = resolverIdTrabajador(idTrabajador);
-
-        return consolidadoRepo
-                .findUltimosCerradosByTrabajador(idTrabajador, Long.MAX_VALUE)
-                .stream()
-                .map(c -> BolsaHistorialDTO.builder()
-                        .idQuincena(c.getQuincena().getIdQuincena())
-                        .quincenaDescripcion(c.getQuincena().getDescripcion())
-                        .fechaInicio(c.getQuincena().getFechaInicio().toString())
-                        .fechaFin(c.getQuincena().getFechaFin().toString())
-                        .bolsaEntrada(c.getBolsaEntrada())
-                        .bolsaAcumulada(c.getBolsaAcumulada())
-                        .bolsaConsumida(c.getBolsaConsumida())
-                        .bolsaSalida(c.getBolsaSalida())
-                        .hBolsaEntrada(fmt(c.getBolsaEntrada()))
-                        .hBolsaAcumulada(fmt(c.getBolsaAcumulada()))
-                        .hBolsaConsumida(fmt(c.getBolsaConsumida()))
-                        .hBolsaSalida(fmt(c.getBolsaSalida()))
-                        .estadoQuincena(c.getQuincena().getEstado().name())
-                        .minExtraPagados(c.getMinExtraPagados())
-                        .minExtraABolsa(c.getMinExtraABolsa())
-                        .build())
-                .collect(Collectors.toList());
-    }
-
-    // ════════════════════════════════════════════════════════════
-    // REPORTE COMPLETO DE QUINCENA
-    // ════════════════════════════════════════════════════════════
     @Override
     public ConsolidadoReporteResponse getReporte(Long idQuincena) {
         Quincena q = buscarQuincena(idQuincena);
-        List<ConsolidadoQuincena> lista =
-                consolidadoRepo.findByQuincena_IdQuincenaOrderByTrabajador_APaterno(idQuincena);
+        List<ConsolidadoQuincena> lista = consolidadoRepo.findVigentesPorQuincena(idQuincena);
 
-        // Totales globales (usa nz() para tratar nulls como 0)
-        int totNormDia = 0, totNormNoche = 0;
-        int totExtDia  = 0, totExtNoche  = 0;
-        int totFaltas  = 0, totPermisos  = 0;
+        int totNormales = 0, totExtra = 0, totFeriado = 0;
+        int totFalta = 0, totPermiso = 0, totFaltaJust = 0;
 
         for (ConsolidadoQuincena c : lista) {
-            totNormDia   += nz(c.getMinNormalesDia());
-            totNormNoche += nz(c.getMinNormalesNoche());
-            totExtDia    += nz(c.getMinExtraDiaA())    + nz(c.getMinExtraDiaB());
-            totExtNoche  += nz(c.getMinExtranocheA())  + nz(c.getMinExtraNocheB());
-            totFaltas    += nz(c.getDiasFalta());
-            totPermisos  += nz(c.getDiasPermiso());
+            totNormales  += c.getTotalNormalesMinutos();
+            totExtra     += c.getTotalExtraMinutos();
+            totFeriado   += c.getTotalFeriadoMinutos();
+            totFalta     += nz(c.getDiasFalta());
+            totPermiso   += nz(c.getDiasPermiso());
+            totFaltaJust += nz(c.getDiasFaltaJustificada());
         }
 
-        int totGeneral = totNormDia + totNormNoche + totExtDia + totExtNoche;
-
         return ConsolidadoReporteResponse.builder()
-                .idQuincena(q.getIdQuincena())
+                .idQuincena(idQuincena)
                 .descripcion(q.getDescripcion())
-                .fechaInicio(q.getFechaInicio().toString())
-                .fechaFin(q.getFechaFin().toString())
+                .inicio(q.getInicio().toString())
+                .fin(q.getFin().toString())
                 .estado(q.getEstado().name())
                 .trabajadores(lista.stream().map(this::toResponse).collect(Collectors.toList()))
-                .totalHNormalesDia(fmt(totNormDia))
-                .totalHNormalesNoche(fmt(totNormNoche))
-                .totalHExtraDia(fmt(totExtDia))
-                .totalHExtraNoche(fmt(totExtNoche))
-                .totalHGeneral(fmt(totGeneral))
-                .totalDiasFalta(totFaltas)
-                .totalDiasPermiso(totPermisos)
                 .totalTrabajadores(lista.size())
+                .totalHNormales(fmt(totNormales))
+                .totalHExtra(fmt(totExtra))
+                .totalHFeriado(fmt(totFeriado))
+                .totalDiasFalta(totFalta)
+                .totalDiasPermiso(totPermiso)
+                .totalDiasFaltaJustificada(totFaltaJust)
                 .build();
     }
 
-    /** Helper null-safe: devuelve 0 si el valor es null. */
-    private int nz(Integer val) {
-        return val != null ? val : 0;
+    // ════════════════════════════════════════════════════════════
+    // REAPERTURA (CU23, RN-38)
+    // ════════════════════════════════════════════════════════════
+
+    /**
+     * Reapertura DIRECTA, en un solo paso, por el Superadministrador.
+     *
+     * El prototipo implementaba un flujo de dos pasos con un estado
+     * REAPERTURA_PENDIENTE que el analisis no contempla, y que ademas no
+     * registraba quien solicitaba ni validaba su rol.
+     */
+    @Override
+    @Transactional
+    public void reabrirQuincena(ReaperturaRequest req) {
+        Quincena q = buscarQuincena(req.getIdQuincena());
+
+        if (q.getEstado() != EstadoQuincena.CERRADA)
+            throw new BusinessException("Solo se puede reabrir una quincena cerrada.");
+
+        Usuario actor = securityHelper.getUsuarioAutenticado();
+
+        q.setEstado(EstadoQuincena.ABIERTA);
+        q.setReabiertoPor(actor);
+        q.setReabiertoEn(LocalDateTime.now());
+        q.setMotivoReapertura(req.getMotivo());
+        quincenaRepo.save(q);
+
+        // Las asistencias vuelven a REVISADO para poder corregirse. No a
+        // CALCULADO: ya fueron revisadas, y devolverlas a ese estado las
+        // haria aparecer como pendientes en la bandeja.
+        for (Asistencia a : asistenciaRepo.findByQuincena(q.getIdQuincena())) {
+            if (a.getEstado() == EstadoAsistencia.CONSOLIDADO) {
+                a.setEstado(EstadoAsistencia.REVISADO);
+                asistenciaRepo.save(a);
+            }
+        }
+
+        auditoria.registrarCampo(TABLA, q.getIdQuincena(), "REABRIR",
+                "estado_quincena", "CERRADA", "ABIERTA");
+        auditoria.registrarConMotivo("quincenas", q.getIdQuincena(), "REABRIR", req.getMotivo());
     }
 
     // ════════════════════════════════════════════════════════════
     // HELPERS
     // ════════════════════════════════════════════════════════════
 
-    /**
-     * Si el usuario autenticado es ROLE_TRABAJADOR, ignora el idTrabajador
-     * recibido y devuelve el id del trabajador autenticado.
-     * Para otros roles, devuelve el idTrabajador original sin cambios.
-     */
-    private Long resolverIdTrabajador(Long idTrabajador) {
-        return securityHelper.resolverIdTrabajador(idTrabajador);
-    }
-
     private Quincena buscarQuincena(Long id) {
         return quincenaRepo.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Quincena no encontrada."));
+                .orElseThrow(() -> new ResourceNotFoundException("Quincena no encontrada: " + id));
     }
 
     private ConsolidadoResponse toResponse(ConsolidadoQuincena c) {
         Trabajador t = c.getTrabajador();
-        int totalNorm  = c.getTotalNormalesMinutos();
-        int totalExtra = c.getTotalExtraMinutos();
 
-        // Minutos que "debe" esta quincena = faltas + tardanzas + salidas tempranas
-        int minDiaDesc   = c.getMinDiaDescontar()     != null ? c.getMinDiaDescontar()     : 0;
-        int minNocheDesc = c.getMinNocheDescontar()   != null ? c.getMinNocheDescontar()   : 0;
-        int minTardanza  = c.getMinTotalTardanza()    != null ? c.getMinTotalTardanza()    : 0;
-        int minSalTemp   = c.getMinTotalSalTemprana() != null ? c.getMinTotalSalTemprana() : 0;
-        int debe         = minDiaDesc + minNocheDesc + minTardanza + minSalTemp;
+        List<TotalTurnoDTO> totales = c.getTotalesPorTurno().stream()
+                .sorted(Comparator
+                        .comparing((ConsolidadoTurno f) -> f.getTurno().getNombre())
+                        .thenComparing(ConsolidadoTurno::isEsFeriado))
+                .map(f -> TotalTurnoDTO.builder()
+                        .turno(f.getTurno().getNombre())
+                        .esFeriado(f.isEsFeriado())
+                        .minNormales(f.getMinNormales())
+                        .minExtra(f.getMinExtra())
+                        .hNormales(fmt(f.getMinNormales()))
+                        .hExtra(fmt(f.getMinExtra()))
+                        .build())
+                .collect(Collectors.toList());
 
         return ConsolidadoResponse.builder()
                 .id(c.getId())
                 .idQuincena(c.getQuincena().getIdQuincena())
                 .quincenaDescripcion(c.getQuincena().getDescripcion())
                 .idTrabajador(t.getIdTrabajador())
-                .trabajadorNombre(t.getPNombre() + " " + t.getAPaterno() + " " + t.getAMaterno())
+                .trabajadorNombre(t.getNombreCompleto())
                 .puestoNombre(t.getPuesto() != null ? t.getPuesto().getPuesto() : null)
-                .areaNombre(t.getPuesto() != null && t.getPuesto().getArea() != null
-                        ? t.getPuesto().getArea().getArea() : null)
-                .minNormalesDia(c.getMinNormalesDia())
-                .minNormalesNoche(c.getMinNormalesNoche())
-                .hNormalesDia(fmt(c.getMinNormalesDia()))
-                .hNormalesNoche(fmt(c.getMinNormalesNoche()))
-                .tasaA(c.getTasaA())
-                .minExtraDiaA(c.getMinExtraDiaA())
-                .minExtranocheA(c.getMinExtranocheA())
-                .hExtraDiaA(fmt(c.getMinExtraDiaA()))
-                .hExtraNocheA(fmt(c.getMinExtranocheA()))
-                .tasaB(c.getTasaB())
-                .minExtraDiaB(c.getMinExtraDiaB())
-                .minExtraNocheB(c.getMinExtraNocheB())
-                .hExtraDiaB(fmt(c.getMinExtraDiaB()))
-                .hExtraNocheB(fmt(c.getMinExtraNocheB()))
-                .hTotalNormales(fmt(totalNorm))
-                .hTotalExtra(fmt(totalExtra))
-                .hTotalGeneral(fmt(totalNorm + totalExtra))
-                .minDiaDescontar(c.getMinDiaDescontar())
-                .minNocheDescontar(c.getMinNocheDescontar())
-                .minTotalTardanza(c.getMinTotalTardanza())
+                .areaNombre(t.getArea() != null ? t.getArea().getArea() : null)
+                .totalesPorTurno(totales)
+                .hTotalNormales(fmt(c.getTotalNormalesMinutos()))
+                .hTotalExtra(fmt(c.getTotalExtraMinutos()))
+                .hTotalFeriado(fmt(c.getTotalFeriadoMinutos()))
+                .hTotalGeneral(fmt(c.getTotalNormalesMinutos() + c.getTotalExtraMinutos()))
                 .diasFalta(c.getDiasFalta())
                 .diasPermiso(c.getDiasPermiso())
-                .bolsaEntrada(c.getBolsaEntrada())
-                .bolsaAcumulada(c.getBolsaAcumulada())
-                .bolsaConsumida(c.getBolsaConsumida())
-                .bolsaSalida(c.getBolsaSalida())
-                .hBolsaEntrada(fmt(c.getBolsaEntrada()))
-                .hBolsaSalida(fmt(c.getBolsaSalida()))
-                .otroBono(c.getOtroBono())
-                .detalleOtroBono(c.getDetalleOtroBono())
+                .diasFaltaJustificada(c.getDiasFaltaJustificada())
+                .minTotalTardanza(c.getMinTotalTardanza())
+                .minTotalSalTemprana(c.getMinTotalSalTemprana())
+                .minAcumuladoVsEsperado(c.getMinAcumuladoVsEsperado())
+                .hAcumuladoVsEsperado(fmtConSigno(c.getMinAcumuladoVsEsperado()))
                 .observaciones(c.getObservaciones())
-                .minExtraPagados(c.getMinExtraPagados())
-                .minExtraABolsa(c.getMinExtraABolsa())
-                .minDebe(debe)
-                .hExtraPagados(fmt(c.getMinExtraPagados()))
-                .hExtraABolsa(fmt(c.getMinExtraABolsa()))
-                .hBolsaConsumida(fmt(c.getBolsaConsumida()))
-                .hDebe(fmt(debe))
-                .estado(c.getEstado())
+                .version(c.getVersion())
+                .estado(c.getEstado().name())
                 .generadoEn(c.getGeneradoEn() != null ? c.getGeneradoEn().toString() : null)
-                .cerradoEn(c.getCerradoEn()   != null ? c.getCerradoEn().toString()   : null)
+                .cerradoEn(c.getCerradoEn() != null ? c.getCerradoEn().toString() : null)
                 .build();
     }
 
-    private String fmt(Integer min) {
-        if (min == null || min == 0) return "00:00";
-        int absMin = Math.abs(min);
-        String sign = min < 0 ? "-" : "";
-        return sign + String.format("%02d:%02d", absMin / 60, absMin % 60);
+    private String fmt(int min) {
+        return String.format("%02d:%02d", min / 60, Math.abs(min % 60));
+    }
+
+    private String fmtConSigno(Integer min) {
+        int v = nz(min);
+        return (v < 0 ? "-" : "+") + fmt(Math.abs(v));
+    }
+
+    private String concatenar(String previo, String nuevo) {
+        if (previo == null || previo.isBlank()) return nuevo;
+        return previo + " " + nuevo;
+    }
+
+    private int nz(Integer v) {
+        return v != null ? v : 0;
     }
 }

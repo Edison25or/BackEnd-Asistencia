@@ -2,15 +2,34 @@ package com.idat.asistencia.model.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+
 import java.time.LocalDateTime;
 
+/**
+ * Registro de acciones sensibles del sistema (RN-02, CU28).
+ * Retencion minima: tres anios (RN-39).
+ *
+ * ============================================================
+ * CAMBIOS RESPECTO DEL PROTOTIPO
+ * ============================================================
+ * 1. Se agrega la relacion real con Usuario. El prototipo declaraba un
+ *    idUsuario suelto que buildBase() NUNCA asignaba, de modo que todo el
+ *    historial de auditoria quedaba sin autor. Se conserva ademas
+ *    nombreUsuario como copia del nombre al momento del evento, que
+ *    sobrevive aunque el usuario cambie de nombre despues.
+ *
+ * 2. Se agrega el campo motivo, para las acciones que exigen
+ *    justificacion (cese, reapertura, correccion de marcacion). El
+ *    prototipo lo concatenaba dentro de valorNuevo, lo que impedia
+ *    filtrar por motivo y mezclaba dos cosas distintas.
+ */
 @Entity
 @Table(name = "auditoria",
-        indexes = {
-                @Index(name = "idx_aud_tabla_registro", columnList = "tabla, id_registro"),
-                @Index(name = "idx_aud_usuario",        columnList = "id_usuario"),
-                @Index(name = "idx_aud_fecha",           columnList = "fecha")
-        })
+       indexes = {
+           @Index(name = "ix_audit_fecha",   columnList = "fecha"),
+           @Index(name = "ix_audit_tabla",   columnList = "tabla, id_registro"),
+           @Index(name = "ix_audit_usuario", columnList = "id_usuario")
+       })
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Auditoria {
 
@@ -18,19 +37,20 @@ public class Auditoria {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** Nombre de la tabla afectada: 'trabajadores', 'grupos_trabajo', etc. */
-    @Column(nullable = false, length = 50)
+    /** Nombre de la entidad afectada. */
+    @Column(nullable = false, length = 60)
     private String tabla;
 
-    /** ID del registro modificado en dicha tabla */
-    @Column(name = "id_registro", nullable = false)
+    @Column(name = "id_registro")
     private Long idRegistro;
 
-    /** CREAR | MODIFICAR | DESHABILITAR | HABILITAR | RESET_PASSWORD | CAMBIAR_ROL | CESAR | REINGRESAR */
-    @Column(nullable = false, length = 30)
+    /**
+     * CREAR, MODIFICAR, DESHABILITAR, HABILITAR, RESET_PASSWORD,
+     * CAMBIAR_ROL, CESAR, REINGRESAR, REABRIR, CIERRE_DIARIO, entre otras.
+     */
+    @Column(nullable = false, length = 40)
     private String accion;
 
-    /** Campo específico que cambió (null para acciones tipo CREAR/CESAR) */
     @Column(length = 60)
     private String campo;
 
@@ -40,9 +60,15 @@ public class Auditoria {
     @Column(name = "valor_nuevo", columnDefinition = "TEXT")
     private String valorNuevo;
 
-    @Column(name = "id_usuario")
-    private Long idUsuario;
+    /** Justificacion, para las acciones que la exigen (RN-02). */
+    @Column(length = 500)
+    private String motivo;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "id_usuario")
+    private Usuario usuario;
+
+    /** Copia del nombre al momento del evento. */
     @Column(name = "nombre_usuario", length = 100)
     private String nombreUsuario;
 

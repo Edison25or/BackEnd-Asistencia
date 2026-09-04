@@ -6,6 +6,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Data
 @Builder
@@ -50,6 +51,18 @@ public class TrabajadorResponseDTO {
     // Grupo al que pertenece actualmente (null si no tiene)
     private Integer grupoActualId;
     private String  grupoActualNombre;
+
+    // ---------- Carne (CU11, RT-02) ----------
+    /**
+     * Codigo unico del carne. Un solo codigo por trabajador, sin sufijos
+     * de entrada ni salida: el sistema deduce cual corresponde segun el
+     * estado de la jornada.
+     *
+     * Faltaba en el DTO: la entidad lo tenia, pero al no exponerse el
+     * frontend recibia undefined y el carne se imprimia sin barcode.
+     */
+    private String codigoBarras;
+    private LocalDateTime fechaGeneracionCarnet;
 
     // Mensaje informativo sobre cambio de credenciales (email/DNI)
     private String mensajeCredencial;

@@ -12,6 +12,21 @@ import org.springframework.security.core.userdetails.UserDetails;
 import java.util.Collection;
 import java.util.List;
 
+/**
+ * Credenciales de acceso. Todo usuario del sistema es, ante todo, un
+ * trabajador (RN-03).
+ *
+ * ============================================================
+ * CAMBIO RESPECTO DEL PROTOTIPO
+ * ============================================================
+ * Se agrega debeCambiarPassword como campo PERSISTIDO (RN-07).
+ *
+ * El prototipo inferia esa condicion comparando el hash de la contrasena
+ * actual contra el numero de documento del trabajador. Esa comparacion se
+ * rompe en cuanto el Superadministrador corrige el documento (CU08): el
+ * usuario que ya habia cambiado su clave vuelve a quedar marcado, o al
+ * reves, uno que nunca la cambio deja de estarlo.
+ */
 @Data
 @Builder
 @NoArgsConstructor
@@ -22,19 +37,21 @@ public class Usuario implements UserDetails {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @Column(name = "id_usuario")
     private Integer idUsuario;
 
+    /** Igual al correo del trabajador. */
     @Column(unique = true, nullable = false)
     private String username;
 
+    /** Hash fuerte con sal. Nunca texto plano. */
     @Column(nullable = false)
     private String password;
 
-    // Nuevo campo para manejar si es ROLE_ADMIN o ROLE_TRABAJADOR
+    /** ROLE_TRABAJADOR, ROLE_SUPERVISOR, ROLE_JEFE, ROLE_ADMIN, ROLE_SUPERADMIN */
     @Column(nullable = false)
     private String rol;
 
-    // Relación 1 a 1 con Trabajador (Puede ser nulo porque el "Admin" principal podría no ser un trabajador)
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "id_trabajador", referencedColumnName = "id_trabajador")
     private Trabajador trabajador;
@@ -43,7 +60,15 @@ public class Usuario implements UserDetails {
     @Builder.Default
     private boolean enabled = true;
 
-    // Actualizamos esto para que Spring Security lea el rol real de la base de datos
+    /**
+     * true mientras el usuario conserve la contrasena temporal. Bloquea
+     * cualquier otra accion hasta que la cambie (RN-07, CU01).
+     * Se activa al crear el usuario y al restablecer la contrasena (CU02).
+     */
+    @Column(name = "debe_cambiar_password", nullable = false)
+    @Builder.Default
+    private boolean debeCambiarPassword = true;
+
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
         return List.of(new SimpleGrantedAuthority(rol));

@@ -7,7 +7,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -16,34 +16,37 @@ public interface QuincenaRepository extends JpaRepository<Quincena, Long> {
 
     Optional<Quincena> findByAnioAndMesAndNumero(Integer anio, Integer mes, Integer numero);
 
-    List<Quincena> findByAnioAndMesOrderByNumeroAsc(Integer anio, Integer mes);
+    List<Quincena> findByEstadoOrderByInicioDesc(EstadoQuincena estado);
 
-    List<Quincena> findByEstadoOrderByAnioDescMesDescNumeroDesc(EstadoQuincena estado);
-
-    /** Quincena abierta más reciente */
-    @Query("""
-        SELECT q FROM Quincena q
-        WHERE q.estado = 'ABIERTA'
-        ORDER BY q.anio DESC, q.mes DESC, q.numero DESC
-    """)
-    List<Quincena> findAbiertas();
+    List<Quincena> findAllByOrderByInicioDesc();
 
     /**
-     * Determina a qué quincena pertenece una fecha/hora dada,
-     * usando la lógica de corte a las horaCorte del día anterior.
-     * Una asistencia cuyo ingreso_real ocurre entre:
-     *   (fechaInicio - 1 día) a las horaCorte
-     *   y fechaFin a las horaCorte
-     * pertenece a esta quincena.
+     * Quincena que contiene el instante dado, con rango SEMIABIERTO
+     * [inicio, fin).
+     *
+     * Reemplaza a findByFechaAproximada(), que tenia dos defectos: su
+     * condicion OR podia devolver varias filas sobre un tipo de retorno
+     * Optional, lo que produce NonUniqueResultException en cuanto existe
+     * mas de una quincena que coincide; y comparaba solo fechas, de modo
+     * que ignoraba la hora de corte del ultimo dia del periodo.
+     *
+     * Con limites semiabiertos, dos quincenas consecutivas teselan sin
+     * solaparse: una jornada que entra exactamente a la hora de corte
+     * pertenece a la quincena siguiente, nunca a las dos.
      */
     @Query("""
         SELECT q FROM Quincena q
-        WHERE :fecha BETWEEN q.fechaInicio AND q.fechaFin
-           OR (:fecha = q.fechaInicio AND :hora >= q.horaCorte)
-        ORDER BY q.anio DESC, q.mes DESC, q.numero DESC
+        WHERE :instante >= q.inicio
+          AND :instante <  q.fin
     """)
-    Optional<Quincena> findByFechaAproximada(
-            @Param("fecha") LocalDate fecha,
-            @Param("hora")  java.time.LocalTime hora
-    );
+    Optional<Quincena> findQueContiene(@Param("instante") LocalDateTime instante);
+
+    /** Comprueba solapamiento antes de crear, para no duplicar periodos. */
+    @Query("""
+        SELECT COUNT(q) > 0 FROM Quincena q
+        WHERE q.inicio < :fin
+          AND q.fin    > :inicio
+    """)
+    boolean existeSolapada(@Param("inicio") LocalDateTime inicio,
+                           @Param("fin")    LocalDateTime fin);
 }

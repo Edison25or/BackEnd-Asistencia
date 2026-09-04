@@ -1,29 +1,44 @@
 package com.idat.asistencia.service.impl;
 
 import com.idat.asistencia.dto.ProgramacionDTOs.*;
-import com.idat.asistencia.model.entity.Quincena;
-import com.idat.asistencia.model.enums.EstadoAsistencia;
-import com.idat.asistencia.model.enums.EstadoQuincena;
-import com.idat.asistencia.model.enums.TipoAsistencia;
-import com.idat.asistencia.repository.QuincenaRepository;
 import com.idat.asistencia.exception.BusinessException;
 import com.idat.asistencia.exception.ResourceNotFoundException;
 import com.idat.asistencia.model.entity.*;
 import com.idat.asistencia.repository.*;
 import com.idat.asistencia.security.SecurityHelper;
+import com.idat.asistencia.service.AuditoriaService;
+import com.idat.asistencia.service.PreRegistroService;
 import com.idat.asistencia.service.ProgramacionSemanalService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
-import java.time.LocalDateTime;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
+/**
+ * Programacion semanal de horarios (CU14).
+ *
+ * ============================================================
+ * QUE CAMBIA
+ * ============================================================
+ * 1. La generacion de pre-registros sale de aqui y pasa a
+ *    PreRegistroService. Estaba duplicada con AsistenciaServiceImpl, y de
+ *    las dos copias solo esta se ejecutaba: la otra ni siquiera estaba
+ *    declarada en su interfaz.
+ *
+ * 2. Desaparece la excepcion "No existe una quincena abierta... Crea la
+ *    quincena primero en Revision de Asistencias". La quincena se
+ *    autogenera (RN-35).
+ *
+ * 3. La quincena ya no se resuelve una vez con el sabado de inicio. Una
+ *    semana que cruza el corte del 15 o de fin de mes pertenece a DOS
+ *    quincenas, y cada dia se asigna a la que le corresponde.
+ */
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
@@ -33,12 +48,12 @@ public class ProgramacionSemanalServiceImpl implements ProgramacionSemanalServic
     private final EsquemaHorarioRepository      esquemaRepo;
     private final GrupoTrabajoRepository        grupoRepo;
     private final TrabajadorRepository          trabajadorRepo;
-    private final QuincenaRepository            quincenaRepo;
-    private final AsistenciaRepository  asistenciaRepository;
-    private final HorarioDiaRepository   horarioDiaRepo;
-    private final SecurityHelper         securityHelper;
+    private final PreRegistroService            preRegistroService;
+    private final SecurityHelper                securityHelper;
+    private final AuditoriaService              auditoria;
 
     private static final DateTimeFormatter FMT = DateTimeFormatter.ofPattern("dd/MM");
+    private static final String TABLA = "programaciones_semanales";
 
     @Override
     public List<ProgramacionResponse> getAll() {
@@ -52,68 +67,67 @@ public class ProgramacionSemanalServiceImpl implements ProgramacionSemanalServic
                 .findBySemanaInicio(LocalDate.parse(semanaInicioStr))
                 .stream().map(this::toResponse).collect(Collectors.toList());
 
-        // V3 FIX: Si es TRABAJADOR, filtrar solo sus propias programaciones
         if (securityHelper.esTrabajador()) {
             Long idPropio = securityHelper.getIdTrabajadorAutenticado();
             return todas.stream()
                     .filter(p -> idPropio.equals(p.getIdTrabajador()))
                     .collect(Collectors.toList());
         }
-
         return todas;
     }
 
-    // ── Asignación individual ─────────────────────────────────
+    // ---------- Asignacion individual ----------
+
     @Override
     @Transactional
     public ProgramacionResponse crear(ProgramacionRequest request) {
         LocalDate inicio = LocalDate.parse(request.getSemanaInicio());
-
-        validarSemanaNoPassada(inicio);
+        validarSemanaNoPasada(inicio);
 
         if (inicio.getDayOfWeek() != DayOfWeek.SATURDAY)
-            throw new BusinessException("La semana debe iniciar en sábado.");
+            throw new BusinessException("La semana debe iniciar en sabado.");
 
         if (request.getIdTrabajador() == null)
             throw new BusinessException("Debe indicar un trabajador.");
 
-        LocalDate fin      = inicio.plusDays(6);
+        LocalDate      fin = inicio.plusDays(6);
         EsquemaHorario esq = buscarEsquema(request.getIdEsquema());
-        Trabajador trab    = buscarTrabajador(request.getIdTrabajador());
+        Trabajador     t   = buscarTrabajador(request.getIdTrabajador());
 
-        if (programacionRepo.existsByTrabajadorAndSemana(trab.getIdTrabajador(), inicio))
-            throw new BusinessException(
-                    "El trabajador '" + trab.getPNombre() + " " + trab.getAPaterno()
-                            + "' ya tiene programación para esa semana.");
+        if (programacionRepo.existsByTrabajadorAndSemana(t.getIdTrabajador(), inicio))
+            throw new BusinessException("El trabajador '" + t.getNombreCompleto()
+                    + "' ya tiene programacion para esa semana.");
 
-        return toResponse(programacionRepo.save(
-                ProgramacionSemanal.builder()
-                        .semanaInicio(inicio).semanaFin(fin)
-                        .esquema(esq).trabajador(trab)
-                        // asignación individual no tiene grupo
-                        .grupoIdSnapshot(null).grupoNombreSnapshot(null)
-                        .build()
-        ));
+        return toResponse(programacionRepo.save(ProgramacionSemanal.builder()
+                .semanaInicio(inicio).semanaFin(fin)
+                .esquema(esq).trabajador(t)
+                .grupoIdSnapshot(null).grupoNombreSnapshot(null)
+                .build()));
     }
 
-    // ── Asignación masiva desde grupo ─────────────────────────
+    // ---------- Asignacion masiva desde grupo ----------
+
     @Override
     @Transactional
     public ProgramacionBulkResponse crearDesdeGrupo(Integer idGrupo,
                                                     String semanaInicioStr,
                                                     Integer idEsquema) {
         LocalDate inicio = LocalDate.parse(semanaInicioStr);
-
-        validarSemanaNoPassada(inicio);
+        validarSemanaNoPasada(inicio);
 
         if (inicio.getDayOfWeek() != DayOfWeek.SATURDAY)
-            throw new BusinessException("La semana debe iniciar en sábado.");
+            throw new BusinessException("La semana debe iniciar en sabado.");
 
         GrupoTrabajo grupo = grupoRepo.findByIdWithTrabajadores(idGrupo)
                 .orElseThrow(() -> new ResourceNotFoundException("Grupo no encontrado."));
 
-        if (grupo.getTrabajadores().isEmpty())
-            throw new BusinessException("El grupo '" + grupo.getNombre() + "' no tiene trabajadores.");
+        // Los miembros se leen desde el lado inverso de la relacion, que
+        // ahora vive en Trabajador.grupoTrabajo.
+        List<Trabajador> miembros = trabajadorRepo.findByGrupoTrabajo_IdGrupo(idGrupo);
+
+        if (miembros.isEmpty())
+            throw new BusinessException("El grupo '" + grupo.getNombre()
+                    + "' no tiene trabajadores.");
 
         EsquemaHorario esquema = buscarEsquema(idEsquema);
         LocalDate fin = inicio.plusDays(6);
@@ -121,16 +135,16 @@ public class ProgramacionSemanalServiceImpl implements ProgramacionSemanalServic
         int creados = 0, omitidos = 0;
         List<ProgramacionSemanal> nuevos = new ArrayList<>();
 
-        for (Trabajador t : grupo.getTrabajadores()) {
+        for (Trabajador t : miembros) {
             if (programacionRepo.existsByTrabajadorAndSemana(t.getIdTrabajador(), inicio)) {
                 omitidos++;
             } else {
                 nuevos.add(ProgramacionSemanal.builder()
                         .semanaInicio(inicio).semanaFin(fin)
                         .esquema(esquema).trabajador(t)
-                        // ── Snapshot: foto del grupo en este momento ──────
-                        // Aunque el grupo cambie después, esta información
-                        // permite reconstruir la tarjeta visual correctamente.
+                        // Copia de los datos del grupo. Permite
+                        // reconstruir la programacion aunque el grupo se
+                        // modifique o elimine despues.
                         .grupoIdSnapshot(grupo.getIdGrupo())
                         .grupoNombreSnapshot(grupo.getNombre())
                         .build());
@@ -140,147 +154,78 @@ public class ProgramacionSemanalServiceImpl implements ProgramacionSemanalServic
 
         if (!nuevos.isEmpty()) programacionRepo.saveAll(nuevos);
 
-        String label = "Sáb " + inicio.format(FMT) + " → Vie " + fin.format(FMT);
         return ProgramacionBulkResponse.builder()
-                .creados(creados).omitidos(omitidos).semanaLabel(label)
+                .creados(creados).omitidos(omitidos)
+                .semanaLabel(etiqueta(inicio, fin))
                 .build();
     }
 
-    // ── Eliminar ──────────────────────────────────────────────
     @Override
     @Transactional
     public void eliminar(Long id) {
         ProgramacionSemanal prog = programacionRepo.findById(id)
-                .orElseThrow(() -> new ResourceNotFoundException("Programación no encontrada."));
-
-        // Bloqueo Etapa 1: semanas pasadas son de solo lectura
-        validarSemanaNoPassada(prog.getSemanaInicio());
-
+                .orElseThrow(() -> new ResourceNotFoundException("Programacion no encontrada."));
+        validarSemanaNoPasada(prog.getSemanaInicio());
         programacionRepo.delete(prog);
     }
 
-    // ── Confirmar semana + generar pre-registros ─────────────
+    // ---------- Confirmar semana ----------
+
     @Override
     @Transactional
     public ConfirmarSemanaResponse confirmarSemana(String semanaInicioStr) {
         LocalDate inicio = LocalDate.parse(semanaInicioStr);
-
-        // Bloqueo: no se puede confirmar una semana ya pasada
-        validarSemanaNoPassada(inicio);
+        validarSemanaNoPasada(inicio);
 
         LocalDate fin = inicio.plusDays(6);
 
-        // ── 1. Obtener todas las programaciones de la semana ──
         List<ProgramacionSemanal> progs = programacionRepo.findBySemanaInicio(inicio);
-
         if (progs.isEmpty())
-            throw new BusinessException(
-                    "No hay trabajadores programados para la semana del "
-                            + inicio.format(FMT) + ".");
+            throw new BusinessException("No hay trabajadores programados para la semana del "
+                    + inicio.format(FMT) + ".");
 
-        // ── 2. Determinar quincena ─────────────────────────────
-        // La semana puede quedar dividida entre dos quincenas.
-        // Usamos el sábado (inicio) para determinar la quincena principal.
-        Quincena quincena = quincenaRepo
-                .findByFechaAproximada(inicio, inicio.atStartOfDay().toLocalTime())
-                .orElse(null);
+        // Toda la logica vive en PreRegistroService: ventana horaria,
+        // resolucion de quincena por dia, marcado de feriados y
+        // neutralizacion de ausencias ya registradas.
+        PreRegistroService.ResultadoGeneracion r =
+                preRegistroService.generar(progs, inicio, fin);
 
-        if (quincena == null)
-            throw new BusinessException(
-                    "No existe una quincena abierta que contenga la semana del "
-                            + inicio.format(FMT) + ". Crea la quincena primero en "
-                            + "Revisión de Asistencias.");
+        String quincenas = r.quincenas().stream()
+                .map(Quincena::getDescripcion)
+                .distinct()
+                .collect(Collectors.joining(" y "));
 
-        if (quincena.getEstado() == EstadoQuincena.CERRADA)
-            throw new BusinessException(
-                    "La quincena «" + quincena.getDescripcion()
-                            + "» ya está cerrada. No se pueden generar nuevos pre-registros.");
+        auditoria.registrarCampo(TABLA, null, "CONFIRMAR_SEMANA", "semana", null,
+                etiqueta(inicio, fin) + ": " + r.creados() + " pre-registros creados, "
+                        + r.omitidos() + " omitidos, quincenas: " + quincenas);
 
-        // ── 3. Generar pre-registros de asistencia ─────────────
-        // Genera pre-registros de asistencia: uno por trabajador × día laborable.
-        int[] contadores = new int[]{0, 0}; // [creados, omitidos]
-
-        for (ProgramacionSemanal prog : progs) {
-            Trabajador t    = prog.getTrabajador();
-            EsquemaHorario e = prog.getEsquema();
-
-            for (LocalDate dia = inicio; !dia.isAfter(fin); dia = dia.plusDays(1)) {
-                int diaSemana = dia.getDayOfWeek().getValue(); // 1=Lun..7=Dom
-
-                HorarioDia hd =
-                        horarioDiaRepo.findByEsquemaAndDia(e.getIdEsquema(), diaSemana)
-                                .orElse(null);
-
-                // Saltar días de descanso o sin horario definido
-                if (hd == null || Boolean.TRUE.equals(hd.getEsDescanso())) continue;
-
-                // No duplicar pre-registros
-                if (asistenciaRepository.existsByTrabajador_IdTrabajadorAndFechaAndTipo(
-                        t.getIdTrabajador(), dia,
-                        TipoAsistencia.PROGRAMADA)) {
-                    contadores[1]++;
-                    continue;
-                }
-
-                // Crear pre-registro
-                Asistencia preReg =
-                        Asistencia.builder()
-                                .trabajador(t)
-                                .fecha(dia)
-                                .tipo(TipoAsistencia.PROGRAMADA)
-                                .estado(EstadoAsistencia.PENDIENTE)
-                                .esquema(e)
-                                .programacion(prog)
-                                .quincena(quincena)
-                                .esNocturno(esNocturnoHora(hd.getHoraEntrada()))
-                                .ingresoProg(hd.getHoraEntrada())
-                                .salidaProg(hd.getHoraSalidaCalculada())
-                                .minRefrigerioProg(hd.getMinutosRefrigerio())
-                                .minNetosProg(hd.getMinutosNetos())
-                                .minExtraProg(hd.getMinutosExtraProgramado())
-                                .build();
-
-                asistenciaRepository.save(preReg);
-                contadores[0]++;
-            }
-        }
-
-        String label = "Sáb " + inicio.format(FMT) + " → Vie " + fin.format(FMT);
         return ConfirmarSemanaResponse.builder()
-                .semanaLabel(label)
+                .semanaLabel(etiqueta(inicio, fin))
                 .totalTrabajadores(progs.size())
-                .preRegistrosCreados(contadores[0])
-                .preRegistrosOmitidos(contadores[1])
-                .quincenaDescripcion(quincena.getDescripcion())
-                .idQuincena(quincena.getIdQuincena())
+                .preRegistrosCreados(r.creados())
+                .preRegistrosOmitidos(r.omitidos())
+                .preRegistrosEnFeriado(r.enFeriado())
+                .quincenaDescripcion(quincenas)
+                .idsQuincenas(r.quincenas().stream()
+                        .map(Quincena::getIdQuincena).distinct().toList())
                 .build();
     }
 
-    /** Clasifica si una hora de ingreso corresponde a turno nocturno */
-    private boolean esNocturnoHora(java.time.LocalTime h) {
-        if (h == null) return false;
-        return h.isAfter(java.time.LocalTime.of(18, 59))
-                || h.isBefore(java.time.LocalTime.of(5, 1));
-    }
+    // ---------- Helpers ----------
 
-    // ── Validación de semana pasada ───────────────────────────
-    /**
-     * Lanza BusinessException si la semana ya terminó (semanaFin < hoy).
-     * Esto protege el historial: ninguna programación de una semana ya
-     * transcurrida puede crearse ni eliminarse.
-     */
-    private void validarSemanaNoPassada(LocalDate semanaInicio) {
+    private void validarSemanaNoPasada(LocalDate semanaInicio) {
         LocalDate semanaFin = semanaInicio.plusDays(6);
-        if (semanaFin.isBefore(LocalDate.now())) {
+        if (semanaFin.isBefore(LocalDate.now()))
             throw new BusinessException(
-                    "No se pueden modificar programaciones de semanas pasadas. " +
-                            "La semana del " + semanaInicio.format(FMT) +
-                            " → " + semanaFin.format(FMT) + " ya ha concluido."
-            );
-        }
+                    "No se pueden modificar programaciones de semanas pasadas. La semana del "
+                            + semanaInicio.format(FMT) + " a " + semanaFin.format(FMT)
+                            + " ya ha concluido.");
     }
 
-    // ── Helpers ───────────────────────────────────────────────
+    private String etiqueta(LocalDate inicio, LocalDate fin) {
+        return "Sab " + inicio.format(FMT) + " a Vie " + fin.format(FMT);
+    }
+
     private EsquemaHorario buscarEsquema(Integer id) {
         return esquemaRepo.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Esquema no encontrado."));
@@ -292,29 +237,27 @@ public class ProgramacionSemanalServiceImpl implements ProgramacionSemanalServic
     }
 
     private ProgramacionResponse toResponse(ProgramacionSemanal p) {
-        String label = "Sáb " + p.getSemanaInicio().format(FMT)
-                + " → Vie " + p.getSemanaFin().format(FMT);
-        Trabajador t    = p.getTrabajador();
-        Puesto puesto   = t.getPuesto();
-        boolean passada = p.getSemanaFin().isBefore(LocalDate.now());
+        Trabajador t      = p.getTrabajador();
+        Puesto     puesto = t.getPuesto();
 
         return ProgramacionResponse.builder()
                 .idProgramacion(p.getIdProgramacion())
                 .semanaInicio(p.getSemanaInicio().toString())
                 .semanaFin(p.getSemanaFin().toString())
-                .semanaLabel(label)
+                .semanaLabel(etiqueta(p.getSemanaInicio(), p.getSemanaFin()))
                 .idEsquema(p.getEsquema().getIdEsquema())
                 .esquemaNombre(p.getEsquema().getNombre())
+                .turnoNombre(p.getEsquema().getTurno() != null
+                        ? p.getEsquema().getTurno().getNombre() : null)
                 .idTrabajador(t.getIdTrabajador())
-                .trabajadorNombre(t.getPNombre() + " " + t.getAPaterno() + " " + t.getAMaterno())
+                .trabajadorNombre(t.getNombreCompleto())
                 .trabajadorDocumento(t.getNroDocumento())
                 .puestoNombre(puesto != null ? puesto.getPuesto() : null)
-                .areaNombre(puesto != null && puesto.getArea() != null ? puesto.getArea().getArea() : null)
-                // Snapshot del grupo
+                .areaNombre(puesto != null && puesto.getArea() != null
+                        ? puesto.getArea().getArea() : null)
                 .grupoIdSnapshot(p.getGrupoIdSnapshot())
                 .grupoNombreSnapshot(p.getGrupoNombreSnapshot())
-                // Flag de solo lectura para el frontend
-                .semanaPassada(passada)
+                .semanaPassada(p.getSemanaFin().isBefore(LocalDate.now()))
                 .build();
     }
 }

@@ -23,39 +23,29 @@ public class AuditoriaController {
 
     private final AuditoriaService service;
 
-    /**
-     * Búsqueda paginada con filtros opcionales.
-     * GET /api/auditoria?tabla=trabajadores&accion=MODIFICAR&page=0&size=20
-     */
+    /** idUsuario pasa de Long a Integer: es el tipo real de Usuario. */
     @GetMapping
     public ResponseEntity<Page<Auditoria>> buscar(
-            @RequestParam(required = false) String tabla,
-            @RequestParam(required = false) String accion,
-            @RequestParam(required = false) Long   idUsuario,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
-            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
+            @RequestParam(required = false) String  tabla,
+            @RequestParam(required = false) String  accion,
+            @RequestParam(required = false) Integer idUsuario,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate desde,
+            @RequestParam(required = false)
+            @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate hasta,
             @RequestParam(defaultValue = "0")  int page,
-            @RequestParam(defaultValue = "30") int size
-    ) {
-        LocalDateTime desdeTs = desde != null ? desde.atStartOfDay()        : null;
-        LocalDateTime hastaTs = hasta != null ? hasta.atTime(23, 59, 59)    : null;
+            @RequestParam(defaultValue = "30") int size) {
 
-        Page<Auditoria> resultado = service.buscar(
-                tabla, accion, idUsuario, desdeTs, hastaTs,
-                PageRequest.of(page, size, Sort.by("fecha").descending())
-        );
-        return ResponseEntity.ok(resultado);
+        LocalDateTime desdeTs = desde != null ? desde.atStartOfDay()     : null;
+        LocalDateTime hastaTs = hasta != null ? hasta.atTime(23, 59, 59) : null;
+
+        return ResponseEntity.ok(service.buscar(tabla, accion, idUsuario, desdeTs, hastaTs,
+                PageRequest.of(page, size, Sort.by("fecha").descending())));
     }
 
-    /**
-     * Historial completo de un registro específico.
-     * GET /api/auditoria/historial?tabla=trabajadores&idRegistro=10001
-     */
     @GetMapping("/historial")
     public ResponseEntity<List<Auditoria>> historial(
-            @RequestParam String tabla,
-            @RequestParam Long   idRegistro
-    ) {
+            @RequestParam String tabla, @RequestParam Long idRegistro) {
         return ResponseEntity.ok(service.getHistorial(tabla, idRegistro));
     }
 }

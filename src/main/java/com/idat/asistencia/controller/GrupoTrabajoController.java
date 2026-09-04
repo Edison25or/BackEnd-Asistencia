@@ -30,6 +30,17 @@ public class GrupoTrabajoController {
         return ResponseEntity.ok(service.getById(id));
     }
 
+    /**
+     * Candidatos para armar un grupo: activos del area y sin grupo
+     * asignado (RN-20, RN-21). Evita que la interfaz ofrezca a alguien
+     * que el servidor va a rechazar.
+     */
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
+    @GetMapping("/disponibles/{idArea}")
+    public ResponseEntity<List<TrabajadorResumenDTO>> disponibles(@PathVariable Integer idArea) {
+        return ResponseEntity.ok(service.getDisponibles(idArea));
+    }
+
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PostMapping
     public ResponseEntity<GrupoResponse> crear(@Valid @RequestBody GrupoRequest request) {
@@ -39,9 +50,15 @@ public class GrupoTrabajoController {
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @PutMapping("/{id}")
     public ResponseEntity<GrupoResponse> actualizar(
-            @PathVariable Integer id,
-            @Valid @RequestBody GrupoRequest request) {
+            @PathVariable Integer id, @Valid @RequestBody GrupoRequest request) {
         return ResponseEntity.ok(service.actualizar(id, request));
+    }
+
+    @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
+    @PostMapping("/{idGrupo}/trabajadores")
+    public ResponseEntity<GrupoResponse> asignar(
+            @PathVariable Integer idGrupo, @RequestBody List<Long> idsTrabajadores) {
+        return ResponseEntity.ok(service.asignarTrabajadores(idGrupo, idsTrabajadores));
     }
 
     @PreAuthorize("hasRole('SUPERADMIN')")
@@ -51,12 +68,10 @@ public class GrupoTrabajoController {
         return ResponseEntity.noContent().build();
     }
 
-    // Remover un trabajador específico del grupo
     @PreAuthorize("hasAnyRole('SUPERADMIN','ADMIN','JEFE')")
     @DeleteMapping("/{idGrupo}/trabajadores/{idTrabajador}")
     public ResponseEntity<GrupoResponse> removerTrabajador(
-            @PathVariable Integer idGrupo,
-            @PathVariable Long idTrabajador) {
+            @PathVariable Integer idGrupo, @PathVariable Long idTrabajador) {
         return ResponseEntity.ok(service.removerTrabajador(idGrupo, idTrabajador));
     }
 }

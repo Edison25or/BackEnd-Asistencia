@@ -14,25 +14,27 @@ import java.util.List;
 @Repository
 public interface AuditoriaRepository extends JpaRepository<Auditoria, Long> {
 
-    // Historial completo de un registro específico
     List<Auditoria> findByTablaAndIdRegistroOrderByFechaDesc(String tabla, Long idRegistro);
 
-    // Paginado con filtros para la pantalla de auditoría
+    /**
+     * El filtro por usuario pasa de un idUsuario suelto a la relacion
+     * real. En el prototipo ese campo nunca se asignaba, de modo que el
+     * filtro no devolvia nada nunca.
+     */
     @Query("""
         SELECT a FROM Auditoria a
-        WHERE (:tabla     IS NULL OR a.tabla        = :tabla)
-          AND (:accion    IS NULL OR a.accion        = :accion)
-          AND (:idUsuario IS NULL OR a.idUsuario     = :idUsuario)
-          AND (:desde     IS NULL OR a.fecha        >= :desde)
-          AND (:hasta     IS NULL OR a.fecha        <= :hasta)
+        LEFT JOIN FETCH a.usuario u
+        WHERE (:tabla     IS NULL OR a.tabla   = :tabla)
+          AND (:accion    IS NULL OR a.accion  = :accion)
+          AND (:idUsuario IS NULL OR u.idUsuario = :idUsuario)
+          AND (:desde     IS NULL OR a.fecha  >= :desde)
+          AND (:hasta     IS NULL OR a.fecha  <= :hasta)
         ORDER BY a.fecha DESC
     """)
-    Page<Auditoria> buscar(
-            @Param("tabla")     String tabla,
-            @Param("accion")    String accion,
-            @Param("idUsuario") Long   idUsuario,
-            @Param("desde")     LocalDateTime desde,
-            @Param("hasta")     LocalDateTime hasta,
-            Pageable pageable
-    );
+    Page<Auditoria> buscar(@Param("tabla")     String  tabla,
+                           @Param("accion")    String  accion,
+                           @Param("idUsuario") Integer idUsuario,
+                           @Param("desde")     LocalDateTime desde,
+                           @Param("hasta")     LocalDateTime hasta,
+                           Pageable pageable);
 }

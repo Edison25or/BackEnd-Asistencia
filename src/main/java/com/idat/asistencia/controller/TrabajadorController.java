@@ -79,7 +79,12 @@ public class TrabajadorController {
     @PostMapping("/{id}/reingreso")
     public ResponseEntity<TrabajadorResponseDTO> reingresarTrabajador(
             @PathVariable Long id,
-            @RequestParam Integer idPuesto) {
+            // OPCIONAL (RN-12): sin idPuesto, el servicio conserva el
+            // puesto del registro anterior, que es el caso habitual del
+            // reingreso. Con required = true por defecto, omitirlo
+            // devolvia 400 y obligaba a reelegir area y puesto aunque el
+            // trabajador volviera al mismo sitio.
+            @RequestParam(required = false) Integer idPuesto) {
         return ResponseEntity.ok(trabajadorService.reingresarTrabajador(id, idPuesto));
     }
 

@@ -1,7 +1,9 @@
 package com.idat.asistencia.service.impl;
 
 import com.idat.asistencia.model.entity.Auditoria;
+import com.idat.asistencia.model.entity.Usuario;
 import com.idat.asistencia.repository.AuditoriaRepository;
+import com.idat.asistencia.repository.UsuarioRepository;
 import com.idat.asistencia.service.AuditoriaService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -22,26 +24,39 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+/**
+ * Registro de acciones sensibles (RN-02, CU28).
+ *
+ * ============================================================
+ * CORRECCION PRINCIPAL
+ * ============================================================
+ * buildBase() declaraba una variable idUsuario que NUNCA asignaba: se
+ * inicializaba en null y se pasaba tal cual al constructor. Todo el
+ * historial de auditoria quedaba sin autor, lo que hacia inutil el filtro
+ * por usuario de CU28 y vaciaba de sentido a la trazabilidad.
+ *
+ * Ahora se resuelve el usuario autenticado y se guarda la relacion real,
+ * ademas del nombre en instantanea que sobrevive a un cambio de nombre.
+ */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuditoriaServiceImpl implements AuditoriaService {
 
     private final AuditoriaRepository auditoriaRepo;
+    private final UsuarioRepository   usuarioRepo;
 
-    // ── Acción simple (sin campo específico) ─────────────────
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void registrar(String tabla, Long idRegistro, String accion) {
         persistir(buildBase(tabla, idRegistro, accion));
     }
 
-    // ── Cambio de un campo único ──────────────────────────────
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void registrarCampo(String tabla, Long idRegistro, String accion,
                                String campo, String anterior, String nuevo) {
-        if (Objects.equals(anterior, nuevo)) return; // nada cambió
+        if (Objects.equals(anterior, nuevo)) return;
 
         Auditoria a = buildBase(tabla, idRegistro, accion);
         a.setCampo(campo);
@@ -50,7 +65,15 @@ public class AuditoriaServiceImpl implements AuditoriaService {
         persistir(a);
     }
 
-    // ── Múltiples cambios en una misma operación ─────────────
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void registrarConMotivo(String tabla, Long idRegistro,
+                                   String accion, String motivo) {
+        Auditoria a = buildBase(tabla, idRegistro, accion);
+        a.setMotivo(motivo);
+        persistir(a);
+    }
+
     @Override
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void registrarCambios(String tabla, Long idRegistro,
@@ -60,8 +83,7 @@ public class AuditoriaServiceImpl implements AuditoriaService {
         for (Map.Entry<String, String[]> entry : cambios.entrySet()) {
             String anterior = entry.getValue()[0];
             String nuevo    = entry.getValue()[1];
-
-            if (Objects.equals(anterior, nuevo)) continue; // campo sin cambio real
+            if (Objects.equals(anterior, nuevo)) continue;
 
             Auditoria a = buildBase(tabla, idRegistro, "MODIFICAR");
             a.setCampo(entry.getKey());
@@ -70,10 +92,15 @@ public class AuditoriaServiceImpl implements AuditoriaService {
             registros.add(a);
         }
 
-        if (!registros.isEmpty()) auditoriaRepo.saveAll(registros);
+        if (!registros.isEmpty()) {
+            try {
+                auditoriaRepo.saveAll(registros);
+            } catch (Exception e) {
+                log.error("Error al guardar auditoria: {}", e.getMessage(), e);
+            }
+        }
     }
 
-    // ── Consultas ─────────────────────────────────────────────
     @Override
     @Transactional(readOnly = true)
     public List<Auditoria> getHistorial(String tabla, Long idRegistro) {
@@ -82,33 +109,30 @@ public class AuditoriaServiceImpl implements AuditoriaService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<Auditoria> buscar(String tabla, String accion, Long idUsuario,
+    public Page<Auditoria> buscar(String tabla, String accion, Integer idUsuario,
                                   LocalDateTime desde, LocalDateTime hasta,
                                   Pageable pageable) {
         return auditoriaRepo.buscar(tabla, accion, idUsuario, desde, hasta, pageable);
     }
 
-    // ── Helpers privados ──────────────────────────────────────
+    // ---------- Helpers ----------
 
-    /**
-     * Construye un registro base con los datos del usuario autenticado
-     * y la IP del request actual, extraídos del contexto de Spring.
-     */
     private Auditoria buildBase(String tabla, Long idRegistro, String accion) {
-        Long   idUsuario    = null;
-        String nombreUsuario = "sistema";
+        Usuario usuario       = null;
+        String  nombreUsuario = "sistema";
 
-        // Extraer usuario del SecurityContext
         try {
             Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-            if (auth != null && auth.isAuthenticated() && !"anonymousUser".equals(auth.getPrincipal())) {
-                nombreUsuario = auth.getName(); // es el username (email)
+            if (auth != null && auth.isAuthenticated()
+                    && !"anonymousUser".equals(auth.getPrincipal())) {
+                nombreUsuario = auth.getName();
+                // Esta es la asignacion que faltaba
+                usuario = usuarioRepo.findByUsername(auth.getName()).orElse(null);
             }
         } catch (Exception e) {
-            log.warn("No se pudo obtener el usuario del SecurityContext: {}", e.getMessage());
+            log.warn("No se pudo obtener el usuario del contexto: {}", e.getMessage());
         }
 
-        // Extraer IP del request HTTP
         String ip = null;
         try {
             ServletRequestAttributes attrs =
@@ -126,7 +150,7 @@ public class AuditoriaServiceImpl implements AuditoriaService {
                 .tabla(tabla)
                 .idRegistro(idRegistro)
                 .accion(accion)
-                .idUsuario(idUsuario)
+                .usuario(usuario)
                 .nombreUsuario(nombreUsuario)
                 .ipOrigen(ip)
                 .fecha(LocalDateTime.now())
@@ -137,8 +161,8 @@ public class AuditoriaServiceImpl implements AuditoriaService {
         try {
             auditoriaRepo.save(a);
         } catch (Exception e) {
-            // La auditoría nunca debe hacer fallar la operación principal
-            log.error("Error al guardar registro de auditoría: {}", e.getMessage(), e);
+            // La auditoria nunca debe hacer fallar la operacion principal
+            log.error("Error al guardar registro de auditoria: {}", e.getMessage(), e);
         }
     }
 }

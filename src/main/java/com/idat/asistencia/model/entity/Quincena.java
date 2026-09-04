@@ -4,14 +4,35 @@ import com.idat.asistencia.model.enums.EstadoQuincena;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
 
+/**
+ * Periodo de pago. Se autogenera al confirmarse una programacion semanal
+ * cuyos dias no pertenecen a ninguna quincena existente (RN-35, CU14).
+ *
+ * ============================================================
+ * CAMBIOS RESPECTO DEL PROTOTIPO
+ * ============================================================
+ * 1. inicio y fin pasan de LocalDate + horaCorte a LocalDateTime. Los
+ *    helpers getInicioReal() y getFinReal() desaparecen porque ahora los
+ *    limites SON los campos.
+ *
+ * 2. El rango es SEMIABIERTO [inicio, fin). Con limites cerrados, dos
+ *    quincenas consecutivas se pisan exactamente en el instante de corte
+ *    y una jornada podria pertenecer a las dos.
+ *
+ * 3. Se elimina la creacion manual. El metodo crearQuincena() y su
+ *    endpoint desaparecen: la quincena se resuelve por dia de jornada
+ *    dentro de confirmarSemana().
+ *
+ * 4. cerradoPor y reabiertoPor pasan de Long suelto a relacion real con
+ *    Usuario.
+ */
 @Entity
 @Table(name = "quincenas",
-        uniqueConstraints = @UniqueConstraint(
-                name = "uq_quincena", columnNames = {"anio", "mes", "numero"}))
+       uniqueConstraints = @UniqueConstraint(
+               name = "uq_quincena", columnNames = {"anio", "mes", "numero"}),
+       indexes = @Index(name = "ix_quincena_rango", columnList = "inicio, fin"))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class Quincena {
 
@@ -23,76 +44,69 @@ public class Quincena {
     @Column(nullable = false)
     private Integer anio;
 
+    /** 1 a 12 */
     @Column(nullable = false)
-    private Integer mes;            // 1..12
+    private Integer mes;
 
+    /** 1 = primera quincena, 2 = segunda */
     @Column(nullable = false)
-    private Integer numero;         // 1 = primera (1–15), 2 = segunda (16–fin)
+    private Integer numero;
 
-    // ── Rango calendario ─────────────────────────────────────
-    @Column(name = "fecha_inicio", nullable = false)
-    private LocalDate fechaInicio;  // día 1 o día 16
+    /** Limite inferior, inclusivo. Incluye la hora de corte. */
+    @Column(nullable = false)
+    private LocalDateTime inicio;
 
-    @Column(name = "fecha_fin", nullable = false)
-    private LocalDate fechaFin;     // día 15 o último día del mes
-
-    /**
-     * Hora de corte para turnos nocturnos.
-     * El período real inicia el día anterior a esta hora y termina
-     * el día fechaFin a esta hora.
-     * Por defecto: 18:00
-     */
-    @Column(name = "hora_corte", nullable = false)
-    @Builder.Default
-    private LocalTime horaCorte = LocalTime.of(18, 0);
-
-    // ── Límites reales (calculados, incluyen lógica nocturna) ─
-    // inicioReal = fechaInicio - 1 día a las horaCorte
-    // finReal    = fechaFin a las horaCorte
+    /** Limite superior, EXCLUSIVO. Incluye la hora de corte. */
+    @Column(nullable = false)
+    private LocalDateTime fin;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 25)
+    @Column(nullable = false, length = 15)
     @Builder.Default
     private EstadoQuincena estado = EstadoQuincena.ABIERTA;
 
-    @Column(name = "cerrado_por")
-    private Long cerradoPor;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "cerrado_por")
+    private Usuario cerradoPor;
 
     @Column(name = "cerrado_en")
     private LocalDateTime cerradoEn;
 
-    @Column(name = "reabierto_por")
-    private Long reabiertoPor;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reabierto_por")
+    private Usuario reabiertoPor;
 
     @Column(name = "reabierto_en")
-    private LocalDateTime reabiertaEn;
+    private LocalDateTime reabiertoEn;
 
-    @Column(name = "motivo_reaper", length = 255)
+    /** Obligatorio al reabrir, entre 10 y 500 caracteres (RN-38). */
+    @Column(name = "motivo_reapertura", length = 500)
     private String motivoReapertura;
 
-    // ── Helpers ───────────────────────────────────────────────
+    // ---------- Helpers ----------
 
     /**
-     * Inicio real del período: el día anterior a fechaInicio a las horaCorte.
-     * Ej: 1ra quincena marzo → 28/02 18:00:00
+     * true si el instante pertenece a esta quincena.
+     * Rango semiabierto: una jornada que entra exactamente a la hora de
+     * corte pertenece a la quincena SIGUIENTE.
      */
-    public LocalDateTime getInicioReal() {
-        return fechaInicio.minusDays(1).atTime(horaCorte);
+    @Transient
+    public boolean contiene(LocalDateTime instante) {
+        return instante != null
+            && !instante.isBefore(inicio)
+            && instante.isBefore(fin);
     }
 
-    /**
-     * Fin real del período: fechaFin a las horaCorte.
-     * Ej: 1ra quincena marzo → 15/03 18:00:00
-     */
-    public LocalDateTime getFinReal() {
-        return fechaFin.atTime(horaCorte);
+    @Transient
+    public boolean isAbierta() {
+        return estado == EstadoQuincena.ABIERTA;
     }
 
-    /** Descripción legible. Ej: "1ra quincena de marzo 2026" */
+    /** Ej: "1ra quincena de marzo 2026" */
+    @Transient
     public String getDescripcion() {
-        String[] meses = {"", "enero","febrero","marzo","abril","mayo","junio",
-                "julio","agosto","septiembre","octubre","noviembre","diciembre"};
-        return (numero == 1 ? "1ra" : "2da") + " quincena de "
-                + meses[mes] + " " + anio;
+        String[] meses = {"", "enero", "febrero", "marzo", "abril", "mayo", "junio",
+                "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"};
+        return (numero == 1 ? "1ra" : "2da") + " quincena de " + meses[mes] + " " + anio;
     }
 }

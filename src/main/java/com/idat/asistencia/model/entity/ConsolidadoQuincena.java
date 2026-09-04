@@ -1,15 +1,41 @@
 package com.idat.asistencia.model.entity;
 
+import com.idat.asistencia.model.enums.EstadoConsolidado;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
+/**
+ * Consolidado de una quincena para un trabajador. Es el artefacto que se
+ * entrega a Contabilidad para calcular el pago (CU21).
+ *
+ * ============================================================
+ * REDISENO COMPLETO RESPECTO DEL PROTOTIPO
+ * ============================================================
+ * Se elimina todo el subsistema de bolsa de horas (entrada, acumulada,
+ * consumida, salida), los tramos de recargo Tasa A del 25 por ciento y
+ * Tasa B del 35 por ciento, el bono en soles con su detalle, los minutos
+ * a descontar y la constante TOPE_TASA_A_MIN.
+ *
+ * Contradicen el alcance: el sistema no calcula montos de pago (AL-01) ni
+ * tramos de recargo porcentual (AL-04). Contabilidad hace ese calculo
+ * fuera del sistema, con la informacion del consolidado exportado
+ * (DEP-05).
+ *
+ * Los totales por turno salen a la tabla hija ConsolidadoTurno. Con
+ * columnas fijas, agregar el desglose de feriado habria llevado el
+ * consolidado de seis a diez columnas, y un tercer turno habria requerido
+ * migrar la tabla. Con filas, un turno adicional solo agrega registros.
+ *
+ * Aqui quedan unicamente los datos que se cuentan por dia y no por turno.
+ */
 @Entity
 @Table(name = "consolidado_quincena",
-        uniqueConstraints = @UniqueConstraint(
-                name = "uq_consol", columnNames = {"id_quincena", "id_trabajador"}))
+       uniqueConstraints = @UniqueConstraint(
+               name = "uq_consol", columnNames = {"id_quincena", "id_trabajador", "version"}))
 @Getter @Setter @NoArgsConstructor @AllArgsConstructor @Builder
 public class ConsolidadoQuincena {
 
@@ -17,121 +43,124 @@ public class ConsolidadoQuincena {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "id_quincena", nullable = false)
     private Quincena quincena;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "id_trabajador", nullable = false)
     private Trabajador trabajador;
 
-    // ── Horas normales ────────────────────────────────────────
-    @Column(name = "min_normales_dia",   nullable = false) @Builder.Default
-    private Integer minNormalesDia   = 0;
-    @Column(name = "min_normales_noche", nullable = false) @Builder.Default
-    private Integer minNormalesNoche = 0;
+    /**
+     * Totales por combinacion de turno y condicion de feriado.
+     * Ver ConsolidadoTurno.
+     */
+    @OneToMany(mappedBy = "consolidado", cascade = CascadeType.ALL,
+               orphanRemoval = true, fetch = FetchType.EAGER)
+    @Builder.Default
+    private List<ConsolidadoTurno> totalesPorTurno = new ArrayList<>();
 
-    // ── Horas extra tasa A ────────────────────────────────────
-    @Column(name = "tasa_a",            nullable = false) @Builder.Default
-    private BigDecimal tasaA       = BigDecimal.valueOf(25.00);
-    @Column(name = "min_extra_dia_a",   nullable = false) @Builder.Default
-    private Integer minExtraDiaA   = 0;
-    @Column(name = "min_extra_noche_a", nullable = false) @Builder.Default
-    private Integer minExtranocheA = 0;
+    // ---------- Conteos por dia ----------
 
-    // ── Horas extra tasa B ────────────────────────────────────
-    @Column(name = "tasa_b",            nullable = false) @Builder.Default
-    private BigDecimal tasaB       = BigDecimal.valueOf(35.00);
-    @Column(name = "min_extra_dia_b",   nullable = false) @Builder.Default
-    private Integer minExtraDiaB   = 0;
-    @Column(name = "min_extra_noche_b", nullable = false) @Builder.Default
-    private Integer minExtraNocheB = 0;
+    @Column(name = "dias_falta", nullable = false)
+    @Builder.Default
+    private Integer diasFalta = 0;
 
-    // ── Descuentos por faltas ─────────────────────────────────
-    @Column(name = "min_dia_descontar",   nullable = false) @Builder.Default
-    private Integer minDiaDescontar   = 0;
-    @Column(name = "min_noche_descontar", nullable = false) @Builder.Default
-    private Integer minNocheDescontar = 0;
-
-    // ── Informativos ──────────────────────────────────────────
-    @Column(name = "min_total_tardanza",    nullable = false) @Builder.Default
-    private Integer minTotalTardanza   = 0;
-    @Column(name = "min_total_sal_temprana",nullable = false) @Builder.Default
-    private Integer minTotalSalTemprana = 0;
-    @Column(name = "dias_falta",   nullable = false) @Builder.Default
-    private Integer diasFalta   = 0;
-    @Column(name = "dias_permiso", nullable = false) @Builder.Default
+    @Column(name = "dias_permiso", nullable = false)
+    @Builder.Default
     private Integer diasPermiso = 0;
 
-    // ── Bolsa de horas ────────────────────────────────────────
-    /** Saldo que llega de la quincena anterior (solo lectura al generar) */
-    @Column(name = "bolsa_entrada", nullable = false) @Builder.Default
-    private Integer bolsaEntrada = 0;
-
-    /**
-     * Minutos extra que el usuario decidió acumular en la bolsa
-     * en lugar de pagar. Se setea al cerrar la quincena.
-     */
-    @Column(name = "bolsa_acumulada", nullable = false) @Builder.Default
-    private Integer bolsaAcumulada = 0;
-
-    /**
-     * Minutos que se consumieron de la bolsa esta quincena
-     * (por descanso compensatorio o compensación de falta recuperable).
-     */
-    @Column(name = "bolsa_consumida", nullable = false) @Builder.Default
-    private Integer bolsaConsumida = 0;
-
-    /**
-     * bolsaSalida = bolsaEntrada + bolsaAcumulada - bolsaConsumida.
-     * Se recalcula antes de cerrar. Puede ser negativo si hay deuda.
-     */
-    @Column(name = "bolsa_salida", nullable = false) @Builder.Default
-    private Integer bolsaSalida = 0;
-
-    // ── Bonos (en soles, ingreso manual) ─────────────────────
-    @Column(name = "otro_bono", precision = 10, scale = 2)
+    @Column(name = "dias_falta_justificada", nullable = false)
     @Builder.Default
-    private BigDecimal otroBono = BigDecimal.ZERO;
+    private Integer diasFaltaJustificada = 0;
 
-    @Column(name = "detalle_otro_bono", length = 255)
-    private String detalleOtroBono;
+    // ---------- Informativos ----------
+
+    @Column(name = "min_total_tardanza", nullable = false)
+    @Builder.Default
+    private Integer minTotalTardanza = 0;
+
+    @Column(name = "min_total_sal_temprana", nullable = false)
+    @Builder.Default
+    private Integer minTotalSalTemprana = 0;
+
+    /** Minutos trabajados menos minutos esperados del periodo. */
+    @Column(name = "min_acumulado_vs_esperado", nullable = false)
+    @Builder.Default
+    private Integer minAcumuladoVsEsperado = 0;
 
     @Column(columnDefinition = "TEXT")
     private String observaciones;
 
-    // ── Decisiones sobre extra al cierre ──────────────────────
-    @Column(name = "min_extra_pagados",  nullable = false) @Builder.Default
-    private Integer minExtraPagados = 0;
-    @Column(name = "min_extra_a_bolsa",  nullable = false) @Builder.Default
-    private Integer minExtraABolsa  = 0;
+    // ---------- Estado y trazabilidad ----------
 
-    // ── Estado y auditoría ────────────────────────────────────
-    @Column(nullable = false, length = 20) @Builder.Default
-    private String estado = "BORRADOR";
+    /**
+     * Se incrementa al regenerar el consolidado tras una reapertura.
+     * La version anterior queda en estado REEMPLAZADO, de modo que ambas
+     * son trazables (RN-38).
+     */
+    @Column(nullable = false)
+    @Builder.Default
+    private Integer version = 1;
 
-    @Column(name = "generado_en", nullable = false) @Builder.Default
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private EstadoConsolidado estado = EstadoConsolidado.BORRADOR;
+
+    @Column(name = "generado_en", nullable = false)
+    @Builder.Default
     private LocalDateTime generadoEn = LocalDateTime.now();
 
-    @Column(name = "generado_por")
-    private Long generadoPor;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "generado_por")
+    private Usuario generadoPor;
 
     @Column(name = "cerrado_en")
     private LocalDateTime cerradoEn;
 
-    @Column(name = "cerrado_por")
-    private Long cerradoPor;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "cerrado_por")
+    private Usuario cerradoPor;
 
-    // ── Helpers ───────────────────────────────────────────────
-    public int getTotalExtraMinutos() {
-        return minExtraDiaA + minExtranocheA + minExtraDiaB + minExtraNocheB;
+    // ---------- Helpers ----------
+
+    /** Agrega o actualiza la fila del turno y condicion de feriado dados. */
+    public ConsolidadoTurno acumular(Turno turno, boolean esFeriado,
+                                     int minNormales, int minExtra) {
+        ConsolidadoTurno fila = totalesPorTurno.stream()
+                .filter(f -> f.coincide(turno, esFeriado))
+                .findFirst()
+                .orElseGet(() -> {
+                    ConsolidadoTurno nueva = ConsolidadoTurno.builder()
+                            .consolidado(this)
+                            .turno(turno)
+                            .esFeriado(esFeriado)
+                            .build();
+                    totalesPorTurno.add(nueva);
+                    return nueva;
+                });
+        fila.setMinNormales(fila.getMinNormales() + minNormales);
+        fila.setMinExtra(fila.getMinExtra() + minExtra);
+        return fila;
     }
 
+    @Transient
     public int getTotalNormalesMinutos() {
-        return minNormalesDia + minNormalesNoche;
+        return totalesPorTurno.stream().mapToInt(ConsolidadoTurno::getMinNormales).sum();
     }
 
-    public void recalcularBolsaSalida() {
-        this.bolsaSalida = bolsaEntrada + bolsaAcumulada - bolsaConsumida;
+    @Transient
+    public int getTotalExtraMinutos() {
+        return totalesPorTurno.stream().mapToInt(ConsolidadoTurno::getMinExtra).sum();
+    }
+
+    /** Minutos trabajados en dia feriado, en todos los turnos. */
+    @Transient
+    public int getTotalFeriadoMinutos() {
+        return totalesPorTurno.stream()
+                .filter(ConsolidadoTurno::isEsFeriado)
+                .mapToInt(f -> f.getMinNormales() + f.getMinExtra())
+                .sum();
     }
 }

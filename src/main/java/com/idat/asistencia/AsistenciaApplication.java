@@ -2,16 +2,19 @@ package com.idat.asistencia;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.data.web.config.EnableSpringDataWebSupport;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
+/**
+ * EnableScheduling activa el proceso de cierre diario de jornadas
+ * (CU29, RN-42), que es el unico productor de los estados de falta
+ * injustificada y marcacion incompleta. Sin esta anotacion el proceso
+ * queda inerte y las ausencias no dejan rastro.
+ */
 @SpringBootApplication
-@EnableSpringDataWebSupport(
-		pageSerializationMode = EnableSpringDataWebSupport.PageSerializationMode.VIA_DTO
-)
+@EnableScheduling
 public class AsistenciaApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(AsistenciaApplication.class, args);
-	}
-
+    public static void main(String[] args) {
+        SpringApplication.run(AsistenciaApplication.class, args);
+    }
 }

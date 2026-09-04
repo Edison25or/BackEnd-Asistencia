@@ -10,30 +10,25 @@ import java.util.Map;
 
 public interface AuditoriaService {
 
-    /**
-     * Registra una acción simple sin cambio de campo (CREAR, CESAR, REINGRESAR, RESET_PASSWORD).
-     */
     void registrar(String tabla, Long idRegistro, String accion);
 
-    /**
-     * Registra un cambio de campo único (un solo valor antes → después).
-     */
     void registrarCampo(String tabla, Long idRegistro, String accion,
                         String campo, String valorAnterior, String valorNuevo);
 
-    /**
-     * Registra múltiples cambios de campos en una sola operación de modificación.
-     * El mapa tiene como clave el nombre del campo y como valor un array de
-     * dos elementos: [valorAnterior, valorNuevo].
-     * Solo persiste los campos donde valorAnterior != valorNuevo.
-     */
     void registrarCambios(String tabla, Long idRegistro, Map<String, String[]> cambios);
 
-    /** Historial completo de un registro */
+    /**
+     * Accion con justificacion obligatoria: cese, reapertura, correccion
+     * de marcacion (RN-02).
+     *
+     * El prototipo concatenaba el motivo dentro de valorNuevo, lo que
+     * impedia filtrar por el y mezclaba dos cosas distintas.
+     */
+    void registrarConMotivo(String tabla, Long idRegistro, String accion, String motivo);
+
     List<Auditoria> getHistorial(String tabla, Long idRegistro);
 
-    /** Búsqueda paginada con filtros */
-    Page<Auditoria> buscar(String tabla, String accion, Long idUsuario,
+    Page<Auditoria> buscar(String tabla, String accion, Integer idUsuario,
                            LocalDateTime desde, LocalDateTime hasta,
                            Pageable pageable);
 }

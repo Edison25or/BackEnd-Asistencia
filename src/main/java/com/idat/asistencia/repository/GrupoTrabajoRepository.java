@@ -12,20 +12,30 @@ import java.util.Optional;
 @Repository
 public interface GrupoTrabajoRepository extends JpaRepository<GrupoTrabajo, Integer> {
 
-    boolean existsByNombre(String nombre);
+    Optional<GrupoTrabajo> findByNombreIgnoreCase(String nombre);
 
-    @Query("SELECT DISTINCT g FROM GrupoTrabajo g LEFT JOIN FETCH g.trabajadores t LEFT JOIN FETCH t.puesto p LEFT JOIN FETCH p.area")
+    boolean existsByNombreIgnoreCase(String nombre);
+
+    /** Grupos de un area. La restriccion de area unica es RN-20. */
+    List<GrupoTrabajo> findByArea_IdArea(Integer idArea);
+
+    /**
+     * Grupo con sus miembros. Al haber pasado la relacion a @OneToMany, el
+     * fetch se hace sobre la coleccion inversa.
+     */
+    @Query("""
+        SELECT g FROM GrupoTrabajo g
+        LEFT JOIN FETCH g.trabajadores t
+        LEFT JOIN FETCH t.puesto p
+        LEFT JOIN FETCH p.area
+        WHERE g.idGrupo = :idGrupo
+    """)
+    Optional<GrupoTrabajo> findByIdWithTrabajadores(@Param("idGrupo") Integer idGrupo);
+
+    @Query("""
+        SELECT DISTINCT g FROM GrupoTrabajo g
+        JOIN FETCH g.area
+        LEFT JOIN FETCH g.trabajadores
+    """)
     List<GrupoTrabajo> findAllWithTrabajadores();
-
-    // Para crearDesdeGrupo — necesita los trabajadores cargados (evita lazy-load vacío)
-    @Query("SELECT g FROM GrupoTrabajo g LEFT JOIN FETCH g.trabajadores t LEFT JOIN FETCH t.puesto p LEFT JOIN FETCH p.area WHERE g.idGrupo = :id")
-    Optional<GrupoTrabajo> findByIdWithTrabajadores(@Param("id") Integer id);
-
-    // Busca el grupo al que pertenece un trabajador (si existe)
-    @Query("SELECT g FROM GrupoTrabajo g JOIN g.trabajadores t WHERE t.idTrabajador = :idTrabajador")
-    Optional<GrupoTrabajo> findByTrabajadorId(@Param("idTrabajador") Long idTrabajador);
-
-    // Busca el grupo al que pertenece un trabajador, excluyendo un grupo específico (para edición)
-    @Query("SELECT g FROM GrupoTrabajo g JOIN g.trabajadores t WHERE t.idTrabajador = :idTrabajador AND g.idGrupo <> :idGrupoExcluir")
-    Optional<GrupoTrabajo> findByTrabajadorIdExcludingGrupo(@Param("idTrabajador") Long idTrabajador, @Param("idGrupoExcluir") Integer idGrupoExcluir);
 }

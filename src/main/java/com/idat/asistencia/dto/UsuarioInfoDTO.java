@@ -6,9 +6,21 @@ import lombok.Data;
 @Data
 @Builder
 public class UsuarioInfoDTO {
-    private String  nombre;               // Nombre completo del trabajador
-    private String  rol;                  // Ej: "ROLE_SUPERADMIN"
-    private String  email;                // username (= email del trabajador)
-    private boolean debeCambiarPassword;  // true cuando la clave es igual al DNI
-    private Long idTrabajador;  // ← agregar
+    private Integer idUsuario;
+    private String  username;
+    private String  rol;
+    private Long    idTrabajador;
+    private String  nombreCompleto;
+    private String  puestoNombre;
+    private String  areaNombre;
+
+    /**
+     * Campo persistido, no inferido comparando el hash contra el numero
+     * de documento como hacia el prototipo (RN-07).
+     */
+    private boolean debeCambiarPassword;
+
+    // Alias conservados para no romper el frontend existente
+    public String getNombre() { return nombreCompleto; }
+    public String getEmail()  { return username; }
 }
